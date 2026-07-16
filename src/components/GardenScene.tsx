@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import type { AssetMap } from '../data/assets'
 import type { FlowerChoice, FlowerId } from '../data/flowers'
 import { FLOWERS } from '../data/flowers'
+import { isInsidePotDropZone, resolveSeedDrop } from '../gesture/seedInteractionMath'
 import type { CursorPoint, PinchEvent, PinchState } from '../hooks/useHandTracking'
 import type { SeedInteractionDebug, SeedInteractionPhase } from '../types/interaction'
 import { FlowerArt } from './FlowerArt'
@@ -27,6 +28,8 @@ interface GardenSceneProps {
   completed: FlowerId[]
   availableFlowers?: FlowerChoice[]
   onPlantFlower?: (flower: FlowerChoice) => void
+  onSeedPickup?: () => void
+  onSeedDrop?: () => void
   onInteractionDebug?: (debug: SeedInteractionDebug) => void
   handCursor?: CursorPoint
   pinchEvent?: PinchEvent | null
@@ -55,6 +58,8 @@ export function GardenScene({
   completed,
   availableFlowers = [],
   onPlantFlower,
+  onSeedPickup,
+  onSeedDrop,
   onInteractionDebug,
   handCursor = { x: 0.5, y: 0.5, visible: false },
   pinchEvent = null,
@@ -125,14 +130,7 @@ export function GardenScene({
 
   const overlapsPot = useCallback((clientX: number, clientY: number) => {
     const bounds = potRef.current?.getBoundingClientRect()
-    if (!bounds) return false
-    const horizontalAllowance = Math.max(54, bounds.width * 0.5)
-    const topAllowance = Math.max(72, bounds.height * 0.32)
-    const bottomAllowance = Math.max(24, bounds.height * 0.1)
-    return clientX >= bounds.left - horizontalAllowance
-      && clientX <= bounds.right + horizontalAllowance
-      && clientY >= bounds.top - topAllowance
-      && clientY <= bounds.bottom + bottomAllowance
+    return isInsidePotDropZone(bounds ?? null, clientX, clientY)
   }, [])
 
   const beginDrag = useCallback((flower: FlowerChoice, source: Exclude<DragSource, null>, clientX: number, clientY: number, pointerId: number | null) => {
@@ -148,12 +146,13 @@ export function GardenScene({
     updateDrag(next)
     updateHovered(flower)
     setDropZoneOverlap(overlapsPot(clientX, clientY))
+    onSeedPickup?.()
 
     transitionFrameRef.current = requestAnimationFrame(() => {
       if (dragRef.current.flower?.id !== flower.id || dragRef.current.source !== source) return
       updateDrag({ ...dragRef.current, phase: 'seed-grabbed' })
     })
-  }, [localPoint, overlapsPot, updateDrag, updateHovered])
+  }, [localPoint, onSeedPickup, overlapsPot, updateDrag, updateHovered])
 
   const moveDrag = useCallback((clientX: number, clientY: number) => {
     const current = dragRef.current
@@ -168,9 +167,10 @@ export function GardenScene({
     if (!current.flower) return
     const point = localPoint(clientX, clientY)
     const released: DragState = { ...current, phase: 'pinch-released', x: point.x, y: point.y }
-    const accepted = !lost && overlapsPot(clientX, clientY)
+    const accepted = resolveSeedDrop(overlapsPot(clientX, clientY), lost) === 'planted'
     updateDrag(released)
     setDropZoneOverlap(accepted)
+    onSeedDrop?.()
 
     transitionFrameRef.current = requestAnimationFrame(() => {
       const latest = dragRef.current
@@ -189,7 +189,7 @@ export function GardenScene({
         updateHovered(null)
       }, 420)
     })
-  }, [localPoint, onPlantFlower, overlapsPot, updateDrag, updateHovered])
+  }, [localPoint, onPlantFlower, onSeedDrop, overlapsPot, updateDrag, updateHovered])
 
   useEffect(() => {
     if (step !== 'choose') {
@@ -351,7 +351,12 @@ export function GardenScene({
           <FlowerArt flower={selected} frames={assets.flowers[selected.id]} grown={grown} />
         )}
 
-        <img className="pot" ref={potRef} src={pot} alt="Flower pot" />
+        <img
+          className="pot"
+          ref={potRef}
+          src={pot}
+          alt={raining || step === 'reveal' ? 'Watered flower pot' : planted ? 'Planted flower pot' : 'Empty flower pot'}
+        />
       </div>
 
       {handCursor.visible && (

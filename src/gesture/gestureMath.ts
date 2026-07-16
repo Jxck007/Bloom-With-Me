@@ -7,6 +7,27 @@ export const PINCH_START_RATIO = 0.38
 export const PINCH_RELEASE_RATIO = 0.5
 export const PINCH_STABLE_FRAMES = 3
 export const PINCH_LOST_FRAME_TOLERANCE = 2
+export const PALM_STABLE_FRAMES = 6
+export const WAVE_STABLE_FRAMES = 3
+export const GESTURE_COOLDOWN_MS = 1250
+
+export type WeatherGesture = 'open-palm' | 'wave'
+export type GestureStability = Record<WeatherGesture, number>
+
+export function updateGestureStability(current: GestureStability, selected: WeatherGesture | undefined): GestureStability {
+  return {
+    'open-palm': selected === 'open-palm' ? current['open-palm'] + 1 : Math.max(0, current['open-palm'] - 1),
+    wave: selected === 'wave' ? current.wave + 1 : Math.max(0, current.wave - 1),
+  }
+}
+
+export function gestureCooldownReady(now: number, cooldownUntil: number): boolean {
+  return now >= cooldownUntil
+}
+
+export function nextGestureCooldown(now: number): number {
+  return now + GESTURE_COOLDOWN_MS
+}
 
 export interface StablePinchTracker {
   state: 'open' | 'pinching'
@@ -118,6 +139,12 @@ export function waveScore(samples: WristSample[]): number {
   if (samples.length < 8) return 0
   const xs = samples.map(s => s.x)
   const range = Math.max(...xs) - Math.min(...xs)
+  const reversals = waveDirectionChanges(samples)
+  return Math.min(1, (range / 0.18) * 0.65 + (reversals / 3) * 0.35)
+}
+
+export function waveDirectionChanges(samples: WristSample[]): number {
+  const xs = samples.map(s => s.x)
   let reversals = 0
   let previousDirection = 0
   for (let i = 1; i < xs.length; i += 1) {
@@ -127,7 +154,7 @@ export function waveScore(samples: WristSample[]): number {
     if (previousDirection && direction !== previousDirection) reversals += 1
     previousDirection = direction
   }
-  return Math.min(1, (range / 0.18) * 0.65 + (reversals / 3) * 0.35)
+  return reversals
 }
 
 export function isWaving(samples: WristSample[]): boolean {

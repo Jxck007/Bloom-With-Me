@@ -1,15 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useAudioManager } from './audio/useAudioManager'
 import { CameraPreview } from './components/CameraPreview'
 import { FlowerArt } from './components/FlowerArt'
 import { GardenScene } from './components/GardenScene'
 import { useAssetMap } from './data/assets'
 import { FLOWERS, type FlowerChoice, type FlowerId } from './data/flowers'
+import {
+  completeGameStep,
+  plantSelectedSeed,
+  resetGameProgress,
+  saveCompletedFlower,
+  selectSeed,
+  type GameStep,
+} from './game/gameState'
+import { loadCompletedFlowers, saveCompletedFlowers } from './game/progressStorage'
 import { useFallbackTimer } from './hooks/useFallbackTimer'
 import { useHandTracking } from './hooks/useHandTracking'
 import { useVoiceTrigger } from './hooks/useVoiceTrigger'
 import type { SeedInteractionDebug } from './types/interaction'
-
-type GameStep = 'welcome' | 'choose' | 'plant' | 'sun' | 'rain' | 'grow' | 'reveal' | 'final'
 
 const STEP_COPY: Record<Exclude<GameStep, 'welcome' | 'choose' | 'reveal' | 'final'>, {
   eyebrow: string
@@ -21,25 +29,25 @@ const STEP_COPY: Record<Exclude<GameStep, 'welcome' | 'choose' | 'reveal' | 'fin
     eyebrow: 'Plant the seed',
     title: 'Pinch your fingers',
     instruction: 'Bring your thumb and finger together.',
-    touchLabel: 'Plant with touch',
+    touchLabel: 'Drag the seed',
   },
   sun: {
     eyebrow: 'Warm the soil',
     title: 'Show an open hand',
     instruction: 'Hold your palm toward the camera.',
-    touchLabel: 'Bring the sun',
+    touchLabel: 'Tap the sun',
   },
   rain: {
     eyebrow: 'Give it water',
     title: 'Wave your hand',
     instruction: 'Move gently from side to side.',
-    touchLabel: 'Make soft rain',
+    touchLabel: 'Tap the cloud',
   },
   grow: {
     eyebrow: 'Help it grow',
     title: 'Say “Grow”',
-    instruction: '“Go”, “Bloom”, or any clear sound also works.',
-    touchLabel: 'Grow with touch',
+    instruction: 'Say grow, bloom, flower, or make one clear, steady sound.',
+    touchLabel: 'Tap to Grow',
   },
 }
 
@@ -47,13 +55,7 @@ function App() {
   const { assets, error: assetError } = useAssetMap()
   const [step, setStep] = useState<GameStep>('welcome')
   const [selected, setSelected] = useState<FlowerChoice | null>(null)
-  const [completed, setCompleted] = useState<FlowerId[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem('bloom-with-me-progress') ?? '[]') as FlowerId[]
-    } catch {
-      return []
-    }
-  })
+  const [completed, setCompleted] = useState<FlowerId[]>(loadCompletedFlowers)
   const [voiceStarted, setVoiceStarted] = useState(false)
   const [reducedMotion, setReducedMotion] = useState(false)
   const [interactionDebug, setInteractionDebug] = useState<SeedInteractionDebug>({
@@ -63,6 +65,10 @@ function App() {
     dropZoneOverlap: false,
   })
   const fallbackReady = useFallbackTimer(`${step}-${selected?.id ?? ''}`, 5000)
+  const lastTouchFallbackRef = useRef(0)
+  const touchFallbackPendingRef = useRef(false)
+  const touchFallbackTimerRef = useRef<number | null>(null)
+  const { muted, play: playSound, toggleMuted } = useAudioManager()
 
   const {
     videoRef,
@@ -77,25 +83,38 @@ function App() {
   } = useHandTracking()
 
   const completeCurrentStep = useCallback(() => {
-    setStep((current) => {
-      if (current === 'plant') return 'sun'
-      if (current === 'sun') return 'rain'
-      if (current === 'rain') return 'grow'
-      if (current === 'grow') return 'reveal'
-      return current
-    })
+    setStep(completeGameStep)
   }, [])
 
-  const { status: voiceStatus, level: voiceLevel, transcript: voiceTranscript, start: startVoice, stop: stopVoice } = useVoiceTrigger(
-    completeCurrentStep,
-  )
+  const completeGrowStep = useCallback(() => {
+    void playSound('sprout')
+    completeCurrentStep()
+  }, [completeCurrentStep, playSound])
+
+  const {
+    status: voiceStatus,
+    level: voiceLevel,
+    soundProgress,
+    transcript: voiceTranscript,
+    feedback: voiceFeedback,
+    speechSupported,
+    start: startVoice,
+    stop: stopVoice,
+    recalibrate: recalibrateVoice,
+  } = useVoiceTrigger(completeGrowStep)
 
   useEffect(() => {
     if (!gestureEvent) return
 
-    if (step === 'sun' && gestureEvent.name === 'open-palm') completeCurrentStep()
-    if (step === 'rain' && gestureEvent.name === 'wave') completeCurrentStep()
-  }, [gestureEvent, step, completeCurrentStep])
+    if (step === 'sun' && gestureEvent.name === 'open-palm') {
+      void playSound('sunlight')
+      completeCurrentStep()
+    }
+    if (step === 'rain' && gestureEvent.name === 'wave') {
+      void playSound('rain')
+      completeCurrentStep()
+    }
+  }, [gestureEvent, step, completeCurrentStep, playSound])
 
   useEffect(() => {
     if (step !== 'grow') {
@@ -105,16 +124,25 @@ function App() {
   }, [step, stopVoice])
 
   useEffect(() => {
-    localStorage.setItem('bloom-with-me-progress', JSON.stringify(completed))
+    saveCompletedFlowers(completed)
   }, [completed])
 
   useEffect(() => {
     document.documentElement.dataset.reducedMotion = String(reducedMotion)
   }, [reducedMotion])
 
+  useEffect(() => () => {
+    if (touchFallbackTimerRef.current !== null) window.clearTimeout(touchFallbackTimerRef.current)
+  }, [])
+
   useEffect(() => {
     if (step === 'welcome' || step === 'final') disableCamera()
   }, [disableCamera, step])
+
+  useEffect(() => {
+    if (step === 'reveal') void playSound('flower-bloom')
+    if (step === 'final') void playSound('final-garden')
+  }, [playSound, step])
 
   const planted = ['sun', 'rain', 'grow', 'reveal'].includes(step)
   const sunny = ['rain', 'grow', 'reveal'].includes(step)
@@ -129,33 +157,45 @@ function App() {
   }, [step])
 
   const begin = () => {
+    void playSound('button-tap')
     if (completed.length === FLOWERS.length) setStep('final')
     else setStep('choose')
   }
 
   const plantFlower = (flower: FlowerChoice) => {
+    const next = plantSelectedSeed(selectSeed(flower.id))
     setSelected(flower)
-    setStep('sun')
+    setStep(next.step)
   }
 
   const saveFlower = () => {
     if (!selected) return
-    const nextCompleted = completed.includes(selected.id)
-      ? completed
-      : [...completed, selected.id]
-    setCompleted(nextCompleted)
+    void playSound('button-tap')
+    const next = saveCompletedFlower(completed, selected.id, FLOWERS.length)
+    setCompleted(next.completed)
     setSelected(null)
-    setStep(nextCompleted.length === FLOWERS.length ? 'final' : 'choose')
+    setStep(next.step)
   }
 
   const resetGarden = () => {
-    setCompleted([])
+    void playSound('button-tap')
+    const next = resetGameProgress()
+    setCompleted(next.completed)
     setSelected(null)
-    setStep('choose')
+    setStep(next.step)
   }
 
   const useTouchFallback = () => {
-    if (step === 'grow') stopVoice()
+    if (step === 'grow') {
+      stopVoice()
+      void playSound('sprout')
+    } else if (step === 'sun') {
+      void playSound('sunlight')
+    } else if (step === 'rain') {
+      void playSound('rain')
+    } else {
+      void playSound('button-tap')
+    }
     completeCurrentStep()
   }
 
@@ -190,7 +230,10 @@ function App() {
       <button
         className="motion-toggle"
         type="button"
-        onClick={() => setReducedMotion((value) => !value)}
+        onClick={() => {
+          void playSound('button-tap')
+          setReducedMotion((value) => !value)
+        }}
         aria-pressed={reducedMotion}
       >
         {reducedMotion ? 'Gentle motion on' : 'Reduce motion'}
@@ -226,15 +269,29 @@ function App() {
               <p className="game-progress">{completed.length} of 3 flowers</p>
             </div>
             <div className="game-header__status">
-              <span className="sound-status" aria-label="Sound is muted">
+              <button
+                className="sound-status"
+                type="button"
+                aria-pressed={!muted}
+                aria-label={muted ? 'Turn sound on' : 'Mute sound'}
+                onClick={() => void toggleMuted()}
+              >
                 <span className="ui-icon-frame ui-icon-frame--trim" aria-hidden="true">
                   <img src={assets.ui.sound} alt="" />
                 </span>
-                Sound off
-              </span>
-              <div className="progress-dots" aria-label={`${completed.length} of 3 flowers complete`}>
+                <span className="sound-status__label">Sound {muted ? 'off' : 'on'}</span>
+              </button>
+              <div
+                className="progress-dots"
+                role="progressbar"
+                aria-label="Garden progress"
+                aria-valuemin={0}
+                aria-valuemax={FLOWERS.length}
+                aria-valuenow={completed.length}
+                aria-valuetext={`${completed.length} of 3 flowers complete`}
+              >
                 {FLOWERS.map((flower) => (
-                  <span key={flower.id} className={completed.includes(flower.id) ? 'is-complete' : ''} />
+                  <span key={flower.id} className={completed.includes(flower.id) ? 'is-complete' : ''} aria-hidden="true" />
                 ))}
               </div>
             </div>
@@ -248,6 +305,8 @@ function App() {
               completed={completed}
               availableFlowers={availableFlowers}
               onPlantFlower={plantFlower}
+              onSeedPickup={() => void playSound('seed-pickup')}
+              onSeedDrop={() => void playSound('seed-drop')}
               onInteractionDebug={setInteractionDebug}
               handCursor={cursor}
               pinchEvent={pinchEvent}
@@ -276,7 +335,7 @@ function App() {
                   <h2>Which flower will you grow?</h2>
                   <p className="instruction-copy">Pinch or drag a storybook packet, then release its seed over the pot.</p>
                   <p className={`touch-drag-hint ${fallbackReady ? 'touch-drag-hint--ready' : ''}`}>
-                    Use touch: drag a packet to the pot.
+                    Use touch: Drag the seed packet to the pot.
                   </p>
                 </>
               )}
@@ -287,15 +346,18 @@ function App() {
                   <h2>{currentStepCopy.title}</h2>
                   <p className="instruction-copy">{currentStepCopy.instruction}</p>
 
-                  <div className={`gesture-demo gesture-demo--${step}`} aria-hidden="true">
-                    <img src={gestureAsset} alt="" />
-                  </div>
+                  {!(step === 'grow' && voiceStarted) && (
+                    <div className={`gesture-demo gesture-demo--${step}`} aria-hidden="true">
+                      <img src={gestureAsset} alt="" />
+                    </div>
+                  )}
 
                   {step === 'grow' && !voiceStarted && (
                     <button
                       className="voice-button"
                       type="button"
                       onClick={() => {
+                        void playSound('button-tap')
                         setVoiceStarted(true)
                         void startVoice()
                       }}
@@ -303,36 +365,74 @@ function App() {
                       <span className="ui-icon-frame ui-icon-frame--trim" aria-hidden="true">
                         <img src={assets.ui.microphone} alt="" />
                       </span>
-                      Start listening
+                      Tap the microphone
                     </button>
                   )}
 
                   {step === 'grow' && voiceStarted && (
-                    <div className="voice-status">
-                      <span
-                        className="voice-status__meter"
-                        style={{ transform: `scaleX(${Math.max(0.08, voiceLevel)})` }}
-                      />
-                      <span>
-                        {voiceStatus === 'starting' && 'Opening microphone…'}
-                        {voiceStatus === 'listening' && 'Listening for your voice…'}
-                        {voiceStatus === 'denied' && 'Microphone is off. Touch still works.'}
-                        {voiceStatus === 'unavailable' && 'Voice is unavailable. Touch still works.'}
-                        {voiceStatus === 'heard' && 'I heard you!'}
-                        {voiceStatus === 'listening' && voiceTranscript && ` Heard: “${voiceTranscript}”`}
-                      </span>
+                    <div className="voice-status" role="status">
+                      <strong>{voiceFeedback}</strong>
+                      {voiceStatus === 'calibrating' && <span className="voice-status__secondary">Finding the quiet around you…</span>}
+                      {voiceStatus === 'denied' && <span className="voice-status__secondary">Microphone is off. Tap to Grow still works.</span>}
+                      {voiceStatus === 'unavailable' && <span className="voice-status__secondary">Voice is not available here. Tap to Grow still works.</span>}
+                      {!speechSupported && voiceStatus !== 'denied' && voiceStatus !== 'unavailable' && (
+                        <span className="voice-status__secondary">Voice is not available here. A long sound still works.</span>
+                      )}
+                      {voiceTranscript && <span className="voice-status__transcript">Heard: “{voiceTranscript}”</span>}
+                      <div
+                        className="voice-meter"
+                        role="progressbar"
+                        aria-label="Microphone level"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={Math.round(voiceLevel * 100)}
+                      >
+                        <span style={{ transform: `scaleX(${Math.max(0.03, voiceLevel)})` }} />
+                        <i style={{ transform: `scaleX(${soundProgress})` }} />
+                      </div>
+                      {(voiceStatus === 'calibrating' || voiceStatus === 'listening') && (
+                        <button className="recalibrate-button" type="button" onClick={recalibrateVoice}>Recalibrate</button>
+                      )}
+                      {(voiceStatus === 'denied' || voiceStatus === 'unavailable') && (
+                        <button
+                          className="recalibrate-button"
+                          type="button"
+                          onClick={() => void startVoice()}
+                        >
+                          Try microphone again
+                        </button>
+                      )}
                     </div>
                   )}
 
                   <button
-                    className={`fallback-button ${fallbackReady ? 'fallback-button--ready' : ''}`}
+                    className={`fallback-button ${step === 'grow' ? 'grow-touch-fallback' : ''} ${fallbackReady ? 'fallback-button--ready grow-touch-fallback--ready' : ''}`}
                     type="button"
-                    onClick={useTouchFallback}
+                    onPointerDown={(event) => {
+                      if (event.pointerType === 'touch') event.preventDefault()
+                    }}
+                    onPointerUp={(event) => {
+                      if (event.pointerType !== 'touch' || touchFallbackPendingRef.current) return
+                      event.preventDefault()
+                      lastTouchFallbackRef.current = performance.now()
+                      touchFallbackPendingRef.current = true
+                      // Let the current touch/click sequence finish before replacing
+                      // this control with the next stage's control.
+                      touchFallbackTimerRef.current = window.setTimeout(() => {
+                        touchFallbackTimerRef.current = null
+                        touchFallbackPendingRef.current = false
+                        useTouchFallback()
+                      }, 80)
+                    }}
+                    onClick={(event) => {
+                      const followsHandledTouch = event.detail !== 0 && performance.now() - lastTouchFallbackRef.current < 600
+                      if (!followsHandledTouch) useTouchFallback()
+                    }}
                   >
                     <span className="ui-icon-frame" aria-hidden="true">
                       <img src={assets.ui.help} alt="" />
                     </span>
-                    {fallbackReady ? currentStepCopy.touchLabel : 'Use touch instead'}
+                    {currentStepCopy.touchLabel}
                   </button>
                 </>
               )}

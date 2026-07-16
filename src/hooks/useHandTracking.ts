@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FilesetResolver, HandLandmarker, type NormalizedLandmark } from '@mediapipe/tasks-vision'
+import type { HandLandmarker, NormalizedLandmark } from '@mediapipe/tasks-vision'
+import { permissionFailure } from '../media/permissionState'
 import {
   advanceStablePinch,
+  gestureCooldownReady,
   initialStablePinchTracker,
   isOpenPalm,
   isWaving,
@@ -9,6 +11,10 @@ import {
   pinchRatio,
   pinchScore,
   PINCH_LOST_FRAME_TOLERANCE,
+  nextGestureCooldown,
+  PALM_STABLE_FRAMES,
+  updateGestureStability,
+  WAVE_STABLE_FRAMES,
   waveScore,
   type GestureName,
   type WristSample,
@@ -151,6 +157,7 @@ export function useHandTracking() {
     if (landmarkerPromiseRef.current) return landmarkerPromiseRef.current
 
     const creation = (async () => {
+      const { FilesetResolver, HandLandmarker } = await import('@mediapipe/tasks-vision')
       const vision = await FilesetResolver.forVisionTasks(WASM_ROOT)
       const create = (delegate: 'GPU' | 'CPU') => HandLandmarker.createFromOptions(vision, {
         baseOptions: { modelAssetPath: MODEL_URL, delegate },
@@ -245,18 +252,14 @@ export function useHandTracking() {
     }
     const selected = (['wave', 'open-palm'] as const).find((gesture) => raw[gesture])
 
-    for (const gesture of ['wave', 'open-palm'] as const) {
-      stableRef.current[gesture] = gesture === selected
-        ? stableRef.current[gesture] + 1
-        : Math.max(0, stableRef.current[gesture] - 1)
-    }
+    stableRef.current = updateGestureStability(stableRef.current, selected)
 
     if (selected) {
-      const needed = selected === 'wave' ? 3 : 6
-      if (stableRef.current[selected] >= needed && now >= cooldownRef.current) {
+      const needed = selected === 'wave' ? WAVE_STABLE_FRAMES : PALM_STABLE_FRAMES
+      if (stableRef.current[selected] >= needed && gestureCooldownReady(now, cooldownRef.current)) {
         eventIdRef.current += 1
         setGestureEvent({ id: eventIdRef.current, name: selected })
-        cooldownRef.current = now + 1250
+        cooldownRef.current = nextGestureCooldown(now)
         stableRef.current[selected] = 0
         if (selected === 'wave') wristHistoryRef.current = []
       }
@@ -392,8 +395,7 @@ export function useHandTracking() {
       stopLiveTracks(stream)
       if (streamRef.current === stream) stopStream()
       if (!mountedRef.current || token !== requestTokenRef.current) return
-      const denied = error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'SecurityError')
-      setTrackingStatus(denied ? 'permission-denied' : 'unavailable')
+      setTrackingStatus(permissionFailure(error) === 'denied' ? 'permission-denied' : 'unavailable')
       resetTracking()
     }
   }, [ensureLandmarker, resetTracking, setTrackingStatus, startLoop, stopLoop, stopStream])

@@ -169,6 +169,10 @@ export function CameraPreview({
         {label}
       </div>
 
+      {(status === 'permission-denied' || status === 'unavailable' || status === 'unsupported') && (
+        <p className="camera-preview__touch-note">Use touch — camera is optional.</p>
+      )}
+
       {expanded && (
         <div className="camera-preview__expanded-content">
           <p className="camera-preview__hint">{hint}</p>
