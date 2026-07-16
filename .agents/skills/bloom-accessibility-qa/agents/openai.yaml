@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bloom Accessibility QA"
+  short_description: "Inclusive gameplay and responsive QA"
+  default_prompt: "Use $bloom-accessibility-qa to test Bloom With Me across input modes, permissions, motion settings, and viewports."

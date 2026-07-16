@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/main.tsx","./src/components/CameraPreview.tsx","./src/components/FlowerArt.tsx","./src/components/GardenScene.tsx","./src/data/assets.ts","./src/data/flowers.ts","./src/gesture/gestureMath.ts","./src/hooks/useFallbackTimer.ts","./src/hooks/useHandTracking.ts","./src/hooks/useVoiceTrigger.ts"],"version":"5.9.3"}

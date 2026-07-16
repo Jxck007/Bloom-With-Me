@@ -1,0 +1,64 @@
+{
+  "background": "/assets/backgrounds/garden-background.jpg",
+  "foreground": "/assets/backgrounds/garden-foreground.png",
+  "sun": "/assets/weather/sun.png",
+  "cloud": "/assets/weather/rain-cloud.png",
+  "seeds": {
+    "rose": {
+      "packet": "/assets/seeds/rose-packet.png",
+      "seed": "/assets/seeds/rose-seed.png"
+    },
+    "sunflower": {
+      "packet": "/assets/seeds/sunflower-packet.png",
+      "seed": "/assets/seeds/sunflower-seed.png"
+    },
+    "lavender": {
+      "packet": "/assets/seeds/lavender-packet.png",
+      "seed": "/assets/seeds/lavender-seed.png"
+    }
+  },
+  "pots": {
+    "empty": "/assets/pots/pot-empty.png",
+    "planted": "/assets/pots/pot-planted.png",
+    "watered": "/assets/pots/pot-watered.png"
+  },
+  "flowers": {
+    "rose": [
+      "/assets/flowers/rose/rose-01.png",
+      "/assets/flowers/rose/rose-02.png",
+      "/assets/flowers/rose/rose-03.png",
+      "/assets/flowers/rose/rose-04.png",
+      "/assets/flowers/rose/rose-05.png",
+      "/assets/flowers/rose/rose-06.png"
+    ],
+    "sunflower": [
+      "/assets/flowers/sunflower/sunflower-01.png",
+      "/assets/flowers/sunflower/sunflower-02.png",
+      "/assets/flowers/sunflower/sunflower-03.png",
+      "/assets/flowers/sunflower/sunflower-04.png",
+      "/assets/flowers/sunflower/sunflower-05.png",
+      "/assets/flowers/sunflower/sunflower-06.png"
+    ],
+    "lavender": [
+      "/assets/flowers/lavender/lavender-01.png",
+      "/assets/flowers/lavender/lavender-02.png",
+      "/assets/flowers/lavender/lavender-03.png",
+      "/assets/flowers/lavender/lavender-04.png",
+      "/assets/flowers/lavender/lavender-05.png",
+      "/assets/flowers/lavender/lavender-06.png"
+    ]
+  },
+  "gestures": {
+    "cursor": "/assets/gestures/butterfly-cursor.png",
+    "pinch": "/assets/gestures/pinch.png",
+    "palm": "/assets/gestures/open-palm.png",
+    "wave": "/assets/gestures/wave.png"
+  },
+  "ui": {
+    "camera": "/assets/ui/camera.png",
+    "microphone": "/assets/ui/microphone.png",
+    "sound": "/assets/ui/sound.png",
+    "restart": "/assets/ui/restart.png",
+    "help": "/assets/ui/help.png"
+  }
+}

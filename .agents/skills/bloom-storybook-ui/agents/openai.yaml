@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bloom Storybook UI"
+  short_description: "Calm, accessible storybook game UI"
+  default_prompt: "Use $bloom-storybook-ui to audit or implement a calm, accessible Bloom With Me game interface."

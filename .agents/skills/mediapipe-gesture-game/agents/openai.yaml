@@ -1,0 +1,4 @@
+interface:
+  display_name: "MediaPipe Gesture Game"
+  short_description: "Reliable hand-gesture game controls"
+  default_prompt: "Use $mediapipe-gesture-game to implement or debug camera hand tracking and gesture controls."
