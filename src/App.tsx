@@ -7,6 +7,7 @@ import { FLOWERS, type FlowerChoice, type FlowerId } from './data/flowers'
 import { useFallbackTimer } from './hooks/useFallbackTimer'
 import { useHandTracking } from './hooks/useHandTracking'
 import { useVoiceTrigger } from './hooks/useVoiceTrigger'
+import type { SeedInteractionDebug } from './types/interaction'
 
 type GameStep = 'welcome' | 'choose' | 'plant' | 'sun' | 'rain' | 'grow' | 'reveal' | 'final'
 
@@ -55,10 +56,25 @@ function App() {
   })
   const [voiceStarted, setVoiceStarted] = useState(false)
   const [reducedMotion, setReducedMotion] = useState(false)
-  const fallbackReady = useFallbackTimer(`${step}-${selected?.id ?? ''}`, 5500)
+  const [interactionDebug, setInteractionDebug] = useState<SeedInteractionDebug>({
+    phase: 'idle',
+    hoveredPacket: null,
+    grabbedSeed: null,
+    dropZoneOverlap: false,
+  })
+  const fallbackReady = useFallbackTimer(`${step}-${selected?.id ?? ''}`, 5000)
 
-  const handEnabled = !['welcome', 'final'].includes(step)
-  const { videoRef, status: handStatus, cursor, gestureEvent, debug: handDebug } = useHandTracking(handEnabled)
+  const {
+    videoRef,
+    status: handStatus,
+    cursor,
+    gestureEvent,
+    pinchEvent,
+    debug: handDebug,
+    enableCamera,
+    retryCamera,
+    disableCamera,
+  } = useHandTracking()
 
   const completeCurrentStep = useCallback(() => {
     setStep((current) => {
@@ -77,7 +93,6 @@ function App() {
   useEffect(() => {
     if (!gestureEvent) return
 
-    if (step === 'plant' && gestureEvent.name === 'pinch') completeCurrentStep()
     if (step === 'sun' && gestureEvent.name === 'open-palm') completeCurrentStep()
     if (step === 'rain' && gestureEvent.name === 'wave') completeCurrentStep()
   }, [gestureEvent, step, completeCurrentStep])
@@ -97,6 +112,10 @@ function App() {
     document.documentElement.dataset.reducedMotion = String(reducedMotion)
   }, [reducedMotion])
 
+  useEffect(() => {
+    if (step === 'welcome' || step === 'final') disableCamera()
+  }, [disableCamera, step])
+
   const planted = ['sun', 'rain', 'grow', 'reveal'].includes(step)
   const sunny = ['rain', 'grow', 'reveal'].includes(step)
   const raining = step === 'grow'
@@ -114,9 +133,9 @@ function App() {
     else setStep('choose')
   }
 
-  const chooseFlower = (flower: FlowerChoice) => {
+  const plantFlower = (flower: FlowerChoice) => {
     setSelected(flower)
-    setStep('plant')
+    setStep('sun')
   }
 
   const saveFlower = () => {
@@ -177,16 +196,6 @@ function App() {
         {reducedMotion ? 'Gentle motion on' : 'Reduce motion'}
       </button>
 
-      {cursor.visible && handStatus === 'ready' && !['welcome', 'final'].includes(step) && (
-        <img
-          className="butterfly-cursor"
-          style={{ left: `${cursor.x * 100}%`, top: `${cursor.y * 100}%` }}
-          src={assets.gestures.cursor}
-          alt=""
-          aria-hidden="true"
-        />
-      )}
-
       {step === 'welcome' && (
         <section className="welcome-screen">
           <GardenScene
@@ -238,7 +247,11 @@ function App() {
               selected={selected}
               completed={completed}
               availableFlowers={availableFlowers}
-              onChooseFlower={chooseFlower}
+              onPlantFlower={plantFlower}
+              onInteractionDebug={setInteractionDebug}
+              handCursor={cursor}
+              pinchEvent={pinchEvent}
+              pinchState={handDebug.pinchState}
               planted={planted}
               sunny={sunny}
               raining={raining}
@@ -249,7 +262,11 @@ function App() {
               videoRef={videoRef}
               status={handStatus}
               debug={handDebug}
+              interaction={interactionDebug}
               cameraIcon={assets.ui.camera}
+              onEnable={() => void enableCamera()}
+              onRetry={() => void retryCamera()}
+              onDisable={disableCamera}
             />
 
             <div className="instruction-panel" aria-live="polite">
@@ -257,7 +274,10 @@ function App() {
                 <>
                   <p className="eyebrow">Choose a seed</p>
                   <h2>Which flower will you grow?</h2>
-                  <p className="instruction-copy">Pick one of the storybook packets beside the pot.</p>
+                  <p className="instruction-copy">Pinch or drag a storybook packet, then release its seed over the pot.</p>
+                  <p className={`touch-drag-hint ${fallbackReady ? 'touch-drag-hint--ready' : ''}`}>
+                    Use touch: drag a packet to the pot.
+                  </p>
                 </>
               )}
 

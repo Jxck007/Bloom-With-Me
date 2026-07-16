@@ -3,6 +3,71 @@ export type GestureName = 'pinch' | 'open-palm' | 'wave'
 export interface Point3D { x: number; y: number; z?: number }
 export interface WristSample { x: number; time: number }
 
+export const PINCH_START_RATIO = 0.38
+export const PINCH_RELEASE_RATIO = 0.5
+export const PINCH_STABLE_FRAMES = 3
+export const PINCH_LOST_FRAME_TOLERANCE = 2
+
+export interface StablePinchTracker {
+  state: 'open' | 'pinching'
+  startFrames: number
+  releaseFrames: number
+  lostFrames: number
+}
+
+export interface StablePinchUpdate {
+  tracker: StablePinchTracker
+  transition: 'start' | 'release' | null
+  reason: 'gesture' | 'lost' | null
+}
+
+export const initialStablePinchTracker = (): StablePinchTracker => ({
+  state: 'open',
+  startFrames: 0,
+  releaseFrames: 0,
+  lostFrames: 0,
+})
+
+export function advanceStablePinch(current: StablePinchTracker, ratio: number | null): StablePinchUpdate {
+  if (ratio === null) {
+    const lostFrames = current.state === 'pinching' ? current.lostFrames + 1 : 0
+    if (current.state === 'pinching' && lostFrames > PINCH_LOST_FRAME_TOLERANCE) {
+      return { tracker: initialStablePinchTracker(), transition: 'release', reason: 'lost' }
+    }
+    return {
+      tracker: { ...current, startFrames: 0, releaseFrames: 0, lostFrames },
+      transition: null,
+      reason: null,
+    }
+  }
+
+  if (current.state === 'open') {
+    const startFrames = ratio <= PINCH_START_RATIO ? current.startFrames + 1 : 0
+    if (startFrames >= PINCH_STABLE_FRAMES) {
+      return {
+        tracker: { state: 'pinching', startFrames: 0, releaseFrames: 0, lostFrames: 0 },
+        transition: 'start',
+        reason: 'gesture',
+      }
+    }
+    return {
+      tracker: { state: 'open', startFrames, releaseFrames: 0, lostFrames: 0 },
+      transition: null,
+      reason: null,
+    }
+  }
+
+  const releaseFrames = ratio >= PINCH_RELEASE_RATIO ? current.releaseFrames + 1 : 0
+  if (releaseFrames >= PINCH_STABLE_FRAMES) {
+    return { tracker: initialStablePinchTracker(), transition: 'release', reason: 'gesture' }
+  }
+  return {
+    tracker: { state: 'pinching', startFrames: 0, releaseFrames, lostFrames: 0 },
+    transition: null,
+    reason: null,
+  }
+}
+
 export function distance(a: Point3D, b: Point3D): number {
   return Math.hypot(a.x - b.x, a.y - b.y)
 }
@@ -10,6 +75,11 @@ export function distance(a: Point3D, b: Point3D): number {
 export function palmSize(l: Point3D[]): number {
   if (l.length < 18) return 0.1
   return Math.max(0.04, (distance(l[0], l[9]) + distance(l[5], l[17])) / 2)
+}
+
+export function pinchRatio(l: Point3D[]): number {
+  if (l.length < 21) return Number.POSITIVE_INFINITY
+  return distance(l[4], l[8]) / palmSize(l)
 }
 
 function fingerExtended(l: Point3D[], tip: number, pip: number, mcp: number): boolean {
@@ -20,7 +90,7 @@ function fingerExtended(l: Point3D[], tip: number, pip: number, mcp: number): bo
 
 export function pinchScore(l: Point3D[]): number {
   if (l.length < 21) return 0
-  const ratio = distance(l[4], l[8]) / palmSize(l)
+  const ratio = pinchRatio(l)
   return Math.max(0, Math.min(1, 1 - ratio / 0.72))
 }
 
