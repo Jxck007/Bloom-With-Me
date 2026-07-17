@@ -14,7 +14,7 @@ The experience is non-competitive: there are no timers, lives, penalties, scores
 - English and Tamil growth-word recognition where Web Speech is available
 - Calibrated sustained-vocal-sound fallback using browser audio levels
 - Muted-by-default procedural game audio
-- Reduced-motion support and responsive layouts
+- Gentle non-flashing animation and responsive layouts
 - Local progress restoration with safe validation of stored data
 
 ## Technology stack
@@ -156,7 +156,6 @@ When browser-provided speech recognition is used, audio handling may involve the
 - [ ] Deny microphone permission and complete growth with **Tap to Grow**.
 - [ ] On a supported browser, verify speech and sustained-sound growth independently.
 - [ ] Confirm camera and microphone tracks stop when disabled or after leaving their stage.
-- [ ] Verify reduced motion through both operating-system preference and the in-game control.
 - [ ] Reload after one saved flower and confirm progress restoration.
 - [ ] Reset a completed garden and confirm saved completion data is removed.
 - [ ] Check 360×800, 390×844, 768×1024, 1024×768, 1366×768, and 1920×1080 layouts.

@@ -612,7 +612,7 @@ button:focus-visible {
 .garden-scene--placement .pot-area {
   z-index: 22;
   left: calc(100% - clamp(145px, 12vw, 166px));
-  bottom: calc(clamp(12px, 1.8vw, 24px) + 240px);
+  bottom: calc(clamp(12px, 1.8vw, 24px) + 200px);
   width: 220px;
   height: 280px;
   opacity: 1;
@@ -2097,7 +2097,7 @@ button:focus-visible {
 
   .garden-scene--placement .pot-area {
     left: calc(100% - 145px);
-    bottom: 248px;
+    bottom: 208px;
     width: 190px;
     height: 250px;
   }
@@ -2118,7 +2118,7 @@ button:focus-visible {
 
   .garden-grid,
   .garden-grid--revealed {
-    top: 44%;
+    top: 46%;
   }
 
   .garden-weather-action--cloud {
@@ -2483,22 +2483,22 @@ button:focus-visible {
 
   .garden-grid,
   .garden-grid--revealed {
-    top: 40%;
+    top: 44%;
     left: 50%;
     width: 96%;
   }
 
   .garden-pagination {
-    top: 54%;
+    top: 62%;
     right: auto;
     left: 50%;
   }
 
   .garden-scene--placement .pot-area {
-    top: 10px;
+    top: 55px;
     right: auto;
     bottom: auto;
-    left: 62%;
+    left: 60%;
     width: 150px;
     height: 180px;
     opacity: 1;

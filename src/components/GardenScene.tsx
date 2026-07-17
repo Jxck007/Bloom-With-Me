@@ -154,7 +154,7 @@ export function GardenScene({
       return slotDistance < nearestDistance ? slot : nearest
     }, null)?.slotIndex ?? null
   }, [slots])
-  const showGardenGrid = gardenView || (step === 'place' && gridRevealed)
+  const showGardenGrid = gardenView || step === 'place'
   const showCalibration = import.meta.env.DEV && new URLSearchParams(window.location.search).has('calibrateGarden')
   const showSun = step === 'sun' && !gardenView
   const showClouds = step === 'rain' && !gardenView
