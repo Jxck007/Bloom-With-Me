@@ -5,3 +5,5 @@ dist
 *.log
 .playwright-cli
 .agents
+.codex
+output/
