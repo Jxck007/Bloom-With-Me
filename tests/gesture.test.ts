@@ -19,6 +19,11 @@ import {
 } from '../src/gesture/gestureMath.ts'
 import { findGardenSlotIncludingOccupied, findMagneticGardenSlot, GARDEN_SLOTS } from '../src/game/gardenSlots.ts'
 import { isInsidePotDropZone, resolveSeedDrop } from '../src/gesture/seedInteractionMath.ts'
+import {
+  initialSunHoldTracker,
+  SUN_HOLD_DURATION_MS,
+  updateSunHold,
+} from '../src/gesture/sunHoldMath.ts'
 
 function runPinch(ratios: Array<number | null>) {
   let tracker = initialStablePinchTracker()
@@ -133,4 +138,38 @@ test('magnetic garden drop accepts near misses and skips occupied slots', () => 
   assert.equal(nearMiss?.slotIndex, target.slotIndex)
   assert.equal(findMagneticGardenSlot(target.xPercent, target.yPercent, new Set([target.slotIndex])), null)
   assert.equal(findGardenSlotIncludingOccupied(target.xPercent, target.yPercent)?.slotIndex, target.slotIndex)
+})
+
+test('sunlight requires the full five-second stable open-palm hold', () => {
+  let tracker = initialSunHoldTracker()
+  for (let now = 0; now < SUN_HOLD_DURATION_MS; now += 100) {
+    tracker = updateSunHold(tracker, true, now)
+    assert.equal(tracker.completed, false)
+  }
+  tracker = updateSunHold(tracker, true, SUN_HOLD_DURATION_MS)
+  assert.equal(tracker.completed, true)
+  assert.equal(tracker.progressMs, SUN_HOLD_DURATION_MS)
+})
+
+test('brief hand loss preserves sunlight progress and longer loss decays gently', () => {
+  let tracker = initialSunHoldTracker()
+  for (let now = 0; now <= 1000; now += 100) tracker = updateSunHold(tracker, true, now)
+  const beforeLoss = tracker.progressMs
+  tracker = updateSunHold(tracker, false, 1100)
+  tracker = updateSunHold(tracker, false, 1200)
+  assert.equal(tracker.progressMs, beforeLoss)
+  tracker = updateSunHold(tracker, true, 1300)
+  assert.ok(tracker.progressMs > beforeLoss)
+
+  const beforeDecay = tracker.progressMs
+  for (let now = 1400; now <= 2400; now += 100) tracker = updateSunHold(tracker, false, now)
+  assert.ok(tracker.progressMs < beforeDecay)
+  assert.ok(tracker.progressMs > beforeDecay - 260)
+})
+
+test('sunlight progress cannot jump directly to completion after a stalled frame', () => {
+  let tracker = updateSunHold(initialSunHoldTracker(), true, 0)
+  tracker = updateSunHold(tracker, true, 8000)
+  assert.equal(tracker.progressMs, 250)
+  assert.equal(tracker.completed, false)
 })

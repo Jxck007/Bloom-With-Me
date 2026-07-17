@@ -2586,6 +2586,12 @@ html[data-reduced-motion="true"] .local-rain__drop {
   animation-iteration-count: 1 !important;
 }
 
+html[data-reduced-motion="true"] .garden-weather--sun-rays {
+  opacity: 0.76;
+  transform: scale(1);
+  animation: none !important;
+}
+
 html[data-reduced-motion="true"] .pot-soil-wet i {
   animation: none !important;
 }
@@ -2596,6 +2602,12 @@ html[data-reduced-motion="true"] .pot-soil-wet i {
     animation-duration: var(--drop-duration) !important;
     animation-delay: var(--drop-delay) !important;
     animation-iteration-count: 1 !important;
+  }
+
+  .garden-weather--sun-rays {
+    opacity: 0.76;
+    transform: scale(1);
+    animation: none !important;
   }
 
   .pot-soil-wet i {
