@@ -1,0 +1,26 @@
+- main [ref=f1e3]:
+  - button "Reduce motion" [ref=f1e4] [cursor=pointer]
+  - generic [ref=f1e13]:
+    - generic [ref=f1e14]:
+      - generic [ref=f1e15]:
+        - paragraph [ref=f1e16]: Bloom With Me
+        - paragraph [ref=f1e17]: "Garden flowers: 0"
+      - generic [ref=f1e18]:
+        - button "Turn sound on" [ref=f1e19] [cursor=pointer]:
+          - generic [ref=f1e21]: Sound off
+        - group [ref=f1e22]:
+          - generic "Garden options" [ref=f1e23] [cursor=pointer]
+    - generic [ref=f1e24]:
+      - generic [ref=f1e25]:
+        - button "Tap or swipe the cloud to make rain" [disabled] [ref=f1e62]
+        - generic:
+          - img "Planted flower pot"
+      - complementary "Hand camera controls" [ref=f1e38]:
+        - button "Expand camera preview" [ref=f1e39] [cursor=pointer]
+        - button "Enable Camera" [ref=f1e43] [cursor=pointer]
+        - status [ref=f1e44]: Camera inactive
+      - generic [ref=f1e46]:
+        - paragraph [ref=f1e52]: Give it water
+        - heading "Gentle rain" [level=2] [ref=f1e65]
+        - paragraph [ref=f1e54]: The drops are landing only in the pot.
+        - button "Tap or swipe the cloud" [disabled] [ref=f1e64] [cursor=pointer]

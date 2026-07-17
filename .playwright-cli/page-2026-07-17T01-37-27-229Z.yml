@@ -1,0 +1,8 @@
+- main [ref=e3]:
+  - button "Reduce motion" [ref=e4] [cursor=pointer]
+  - generic [ref=e7]:
+    - paragraph [ref=e8]: A calm garden game
+    - heading "Bloom With Me" [level=1] [ref=e9]
+    - paragraph [ref=e10]: Use your hand, your voice, or simply touch the screen.
+    - button "Start garden" [ref=e11] [cursor=pointer]
+    - paragraph [ref=e12]: Camera and microphone are used only after you choose to turn them on.

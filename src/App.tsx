@@ -1,25 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAudioManager } from './audio/useAudioManager'
 import { CameraPreview } from './components/CameraPreview'
-import { FlowerArt } from './components/FlowerArt'
-import { GardenScene } from './components/GardenScene'
+import { GardenScene, type WeatherState } from './components/GardenScene'
+import { AssetImage } from './components/AssetImage'
 import { useAssetMap } from './data/assets'
-import { FLOWERS, type FlowerChoice, type FlowerId } from './data/flowers'
+import { FLOWERS, type FlowerChoice } from './data/flowers'
+import { completeGameStep, plantSelectedSeed, selectSeed, type GameStep } from './game/gameState'
 import {
-  completeGameStep,
-  plantSelectedSeed,
-  resetGameProgress,
-  saveCompletedFlower,
-  selectSeed,
-  type GameStep,
-} from './game/gameState'
-import { loadCompletedFlowers, saveCompletedFlowers } from './game/progressStorage'
+  clearGardenData,
+  createEmptyGarden,
+  ensureActivePageHasSpace,
+  gardenFlowerCount,
+  loadGardenData,
+  plantGardenFlower,
+  saveGardenData,
+  setActiveGardenPage,
+  type GardenData,
+} from './game/gardenStorage'
 import { useFallbackTimer } from './hooks/useFallbackTimer'
 import { useHandTracking } from './hooks/useHandTracking'
 import { useVoiceTrigger } from './hooks/useVoiceTrigger'
 import type { SeedInteractionDebug } from './types/interaction'
 
-const STEP_COPY: Record<Exclude<GameStep, 'welcome' | 'choose' | 'reveal' | 'final'>, {
+const SUN_HOLD_MS = 900
+const SUN_RESULT_MS = 1_450
+const SUN_EXIT_MS = 500
+const RAIN_DURATION_MS = 4_800
+const CLOUD_ENTER_MS = 850
+const CLOUD_CLEAR_MS = 1_450
+
+const STEP_COPY: Record<Exclude<GameStep, 'welcome' | 'choose' | 'place'>, {
   eyebrow: string
   title: string
   instruction: string
@@ -41,13 +51,13 @@ const STEP_COPY: Record<Exclude<GameStep, 'welcome' | 'choose' | 'reveal' | 'fin
     eyebrow: 'Give it water',
     title: 'Wave your hand',
     instruction: 'Move gently from side to side.',
-    touchLabel: 'Tap the cloud',
+    touchLabel: 'Tap or swipe the cloud',
   },
   grow: {
     eyebrow: 'Help it grow',
     title: 'Say “Grow”',
     instruction: 'Say grow, bloom, flower, or make one clear, steady sound.',
-    touchLabel: 'Tap to Grow',
+    touchLabel: 'Tap to grow',
   },
 }
 
@@ -55,20 +65,45 @@ function App() {
   const { assets, error: assetError } = useAssetMap()
   const [step, setStep] = useState<GameStep>('welcome')
   const [selected, setSelected] = useState<FlowerChoice | null>(null)
-  const [completed, setCompleted] = useState<FlowerId[]>(loadCompletedFlowers)
+  const [garden, setGarden] = useState<GardenData>(loadGardenData)
   const [voiceStarted, setVoiceStarted] = useState(false)
-  const [reducedMotion, setReducedMotion] = useState(false)
+  const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
+  const [sunCelebrating, setSunCelebrating] = useState(false)
+  const [sunExiting, setSunExiting] = useState(false)
+  const [sunHoldMs, setSunHoldMs] = useState(0)
+  const [weatherState, setWeatherState] = useState<WeatherState>('clear')
+  const [rainGestureArmed, setRainGestureArmed] = useState(false)
+  const [rainGuide, setRainGuide] = useState<'Release your hand' | 'Open your hand' | 'Move left' | 'Move right' | 'One more time'>('Release your hand')
+  const [growthStarted, setGrowthStarted] = useState(false)
+  const [plantMessage, setPlantMessage] = useState('')
   const [interactionDebug, setInteractionDebug] = useState<SeedInteractionDebug>({
     phase: 'idle',
     hoveredPacket: null,
     grabbedSeed: null,
     dropZoneOverlap: false,
   })
-  const fallbackReady = useFallbackTimer(`${step}-${selected?.id ?? ''}`, 5000)
+  const fallbackReady = useFallbackTimer(`${step}-${selected?.id ?? ''}-${weatherState}`, 5000)
   const lastTouchFallbackRef = useRef(0)
   const touchFallbackPendingRef = useRef(false)
   const touchFallbackTimerRef = useRef<number | null>(null)
+  const transitionTimersRef = useRef(new Set<number>())
+  const plantingTimerRef = useRef<number | null>(null)
+  const palmHoldStartedRef = useRef<number | null>(null)
+  const rainMotionRef = useRef({ x: null as number | null, direction: 0, changes: 0 })
+  const stepRef = useRef<GameStep>(step)
+  const weatherStateRef = useRef<WeatherState>(weatherState)
+  const gardenRef = useRef(garden)
+  const selectedRef = useRef(selected)
+  const growthStartedRef = useRef(false)
+  const weatherBusyRef = useRef(false)
+  const placingRef = useRef(false)
   const { muted, play: playSound, toggleMuted } = useAudioManager()
+
+  stepRef.current = step
+  weatherStateRef.current = weatherState
+  gardenRef.current = garden
+  selectedRef.current = selected
+  growthStartedRef.current = growthStarted
 
   const {
     videoRef,
@@ -82,14 +117,26 @@ function App() {
     disableCamera,
   } = useHandTracking()
 
-  const completeCurrentStep = useCallback(() => {
-    setStep(completeGameStep)
+  const scheduleTransition = useCallback((callback: () => void, delay: number) => {
+    const timer = window.setTimeout(() => {
+      transitionTimersRef.current.delete(timer)
+      callback()
+    }, delay)
+    transitionTimersRef.current.add(timer)
   }, [])
 
-  const completeGrowStep = useCallback(() => {
+  const commitGarden = useCallback((next: GardenData) => {
+    gardenRef.current = next
+    setGarden(next)
+    saveGardenData(next)
+  }, [])
+
+  const startGrowth = useCallback(() => {
+    if (stepRef.current !== 'grow' || growthStartedRef.current) return
+    growthStartedRef.current = true
+    setGrowthStarted(true)
     void playSound('sprout')
-    completeCurrentStep()
-  }, [completeCurrentStep, playSound])
+  }, [playSound])
 
   const {
     status: voiceStatus,
@@ -101,31 +148,106 @@ function App() {
     start: startVoice,
     stop: stopVoice,
     recalibrate: recalibrateVoice,
-  } = useVoiceTrigger(completeGrowStep)
+  } = useVoiceTrigger(startGrowth)
+
+  const finishSunStage = useCallback(() => {
+    if (stepRef.current !== 'sun' || weatherBusyRef.current) return
+    weatherBusyRef.current = true
+    setSunHoldMs(SUN_HOLD_MS)
+    setSunExiting(false)
+    setSunCelebrating(true)
+    void playSound('sunlight')
+    scheduleTransition(() => {
+      setSunCelebrating(false)
+      setSunExiting(true)
+      scheduleTransition(() => {
+        setSunExiting(false)
+        setRainGestureArmed(false)
+        setRainGuide('Release your hand')
+        setWeatherState('cloudEntering')
+        setStep('rain')
+        scheduleTransition(() => {
+          setWeatherState('cloudy')
+          weatherBusyRef.current = false
+        }, CLOUD_ENTER_MS)
+      }, SUN_EXIT_MS)
+    }, SUN_RESULT_MS)
+  }, [playSound, scheduleTransition])
+
+  const finishRainStage = useCallback(() => {
+    if (stepRef.current !== 'rain' || weatherStateRef.current !== 'cloudy' || weatherBusyRef.current) return
+    weatherBusyRef.current = true
+    setWeatherState('raining')
+    void playSound('rain')
+    scheduleTransition(() => {
+      setWeatherState('clearing')
+      scheduleTransition(() => {
+        setWeatherState('clear')
+        weatherBusyRef.current = false
+        setStep('grow')
+      }, CLOUD_CLEAR_MS)
+    }, RAIN_DURATION_MS)
+  }, [playSound, scheduleTransition])
 
   useEffect(() => {
-    if (!gestureEvent) return
+    if (step !== 'sun' || sunCelebrating || !handDebug.handVisible || handDebug.currentGesture !== 'open-palm') {
+      palmHoldStartedRef.current = null
+      if (step === 'sun' && !sunCelebrating) setSunHoldMs(0)
+      return
+    }
+    const now = performance.now()
+    if (palmHoldStartedRef.current === null) palmHoldStartedRef.current = now
+    const heldFor = now - palmHoldStartedRef.current
+    setSunHoldMs(Math.min(SUN_HOLD_MS, heldFor))
+    if (heldFor >= SUN_HOLD_MS) finishSunStage()
+  }, [finishSunStage, handDebug.currentGesture, handDebug.handVisible, handDebug.landmarks, step, sunCelebrating])
 
-    if (step === 'sun' && gestureEvent.name === 'open-palm') {
-      void playSound('sunlight')
-      completeCurrentStep()
+  useEffect(() => {
+    if (step !== 'rain' || weatherState !== 'cloudy' || rainGestureArmed) return
+    const neutralGesture = !handDebug.handVisible
+      || (handDebug.currentGesture !== 'open-palm' && handDebug.currentGesture !== 'wave' && handDebug.currentGesture !== 'pinch')
+    if (neutralGesture) {
+      setRainGestureArmed(true)
+      setRainGuide('Open your hand')
     }
-    if (step === 'rain' && gestureEvent.name === 'wave') {
-      void playSound('rain')
-      completeCurrentStep()
+  }, [handDebug.currentGesture, handDebug.handVisible, rainGestureArmed, step, weatherState])
+
+  useEffect(() => {
+    if (step === 'rain' && weatherState === 'cloudy' && rainGestureArmed && gestureEvent?.name === 'wave') finishRainStage()
+  }, [finishRainStage, gestureEvent, rainGestureArmed, step, weatherState])
+
+  useEffect(() => {
+    if (step !== 'rain' || weatherState !== 'cloudy' || !rainGestureArmed || !handDebug.handVisible || (handDebug.currentGesture !== 'open-palm' && handDebug.currentGesture !== 'wave')) {
+      rainMotionRef.current = { x: null, direction: 0, changes: 0 }
+      return
     }
-  }, [gestureEvent, step, completeCurrentStep, playSound])
+    const x = handDebug.cursorX
+    if (x === null) return
+    const motion = rainMotionRef.current
+    if (motion.x === null) {
+      motion.x = x
+      setRainGuide('Move left')
+      return
+    }
+    const delta = x - motion.x
+    if (Math.abs(delta) < 0.025) return
+    const direction = Math.sign(delta)
+    if (motion.direction && direction !== motion.direction) motion.changes += 1
+    motion.direction = direction
+    motion.x = x
+    setRainGuide(motion.changes >= 2 ? 'One more time' : direction < 0 ? 'Move right' : 'Move left')
+  }, [handDebug.currentGesture, handDebug.cursorX, handDebug.handVisible, rainGestureArmed, step, weatherState])
 
   useEffect(() => {
     if (step !== 'grow') {
       setVoiceStarted(false)
+      setGrowthStarted(false)
+      growthStartedRef.current = false
+      stopVoice()
+    } else if (growthStarted) {
       stopVoice()
     }
-  }, [step, stopVoice])
-
-  useEffect(() => {
-    saveCompletedFlowers(completed)
-  }, [completed])
+  }, [growthStarted, step, stopVoice])
 
   useEffect(() => {
     document.documentElement.dataset.reducedMotion = String(reducedMotion)
@@ -133,70 +255,101 @@ function App() {
 
   useEffect(() => () => {
     if (touchFallbackTimerRef.current !== null) window.clearTimeout(touchFallbackTimerRef.current)
+    if (plantingTimerRef.current !== null) window.clearTimeout(plantingTimerRef.current)
+    transitionTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+    transitionTimersRef.current.clear()
   }, [])
 
   useEffect(() => {
-    if (step === 'welcome' || step === 'final') disableCamera()
+    if (step === 'welcome') disableCamera()
   }, [disableCamera, step])
 
-  useEffect(() => {
-    if (step === 'reveal') void playSound('flower-bloom')
-    if (step === 'final') void playSound('final-garden')
-  }, [playSound, step])
+  const planted = ['sun', 'rain', 'grow', 'place'].includes(step)
+  const sunny = step === 'sun' && sunCelebrating
+  const watered = weatherState === 'clearing' || step === 'grow' || step === 'place'
+  const flowerCount = gardenFlowerCount(garden)
 
-  const planted = ['sun', 'rain', 'grow', 'reveal'].includes(step)
-  const sunny = ['rain', 'grow', 'reveal'].includes(step)
-  const raining = step === 'grow'
-  const grown = step === 'reveal'
-
-  const currentStepCopy = useMemo(() => {
-    if (step === 'plant' || step === 'sun' || step === 'rain' || step === 'grow') {
-      return STEP_COPY[step]
-    }
-    return null
-  }, [step])
+  const currentStepCopy = useMemo(() => ['plant', 'sun', 'rain', 'grow'].includes(step)
+    ? STEP_COPY[step as 'plant' | 'sun' | 'rain' | 'grow']
+    : null, [step])
 
   const begin = () => {
     void playSound('button-tap')
-    if (completed.length === FLOWERS.length) setStep('final')
-    else setStep('choose')
+    setStep('choose')
   }
 
-  const plantFlower = (flower: FlowerChoice) => {
-    const next = plantSelectedSeed(selectSeed(flower.id))
+  const selectFlower = (flower: FlowerChoice) => {
+    const prepared = ensureActivePageHasSpace(gardenRef.current)
+    if (prepared !== gardenRef.current) commitGarden(prepared)
+    const next = selectSeed(flower.id)
+    setPlantMessage('')
+    setSunCelebrating(false)
+    setSunExiting(false)
     setSelected(flower)
     setStep(next.step)
   }
 
-  const saveFlower = () => {
-    if (!selected) return
-    void playSound('button-tap')
-    const next = saveCompletedFlower(completed, selected.id, FLOWERS.length)
-    setCompleted(next.completed)
-    setSelected(null)
+  const plantSeed = () => {
+    if (!selectedRef.current) return
+    const next = plantSelectedSeed({ selected: selectedRef.current.id, step: stepRef.current })
+    setWeatherState('clear')
     setStep(next.step)
   }
 
+  const finishGrowth = useCallback(() => {
+    if (stepRef.current !== 'grow') return
+    void playSound('flower-bloom')
+    setStep(completeGameStep('grow'))
+  }, [playSound])
+
+  const plantFlower = useCallback((slotIndex: number) => {
+    if (stepRef.current !== 'place' || !selectedRef.current || placingRef.current) return false
+    const next = plantGardenFlower(gardenRef.current, selectedRef.current.id, slotIndex)
+    if (!next) return false
+    placingRef.current = true
+    commitGarden(next)
+    setPlantMessage(`${selectedRef.current.name} planted in Garden ${next.activePageIndex + 1}.`)
+    void playSound('seed-drop')
+    plantingTimerRef.current = window.setTimeout(() => {
+      plantingTimerRef.current = null
+      placingRef.current = false
+      setSelected(null)
+      setStep('choose')
+    }, reducedMotion ? 120 : 650)
+    return true
+  }, [commitGarden, playSound, reducedMotion])
+
+  const changeGardenPage = useCallback((pageIndex: number) => {
+    const next = setActiveGardenPage(gardenRef.current, pageIndex)
+    if (next !== gardenRef.current) {
+      void playSound('button-tap')
+      commitGarden(next)
+    }
+  }, [commitGarden, playSound])
+
   const resetGarden = () => {
+    if (!window.confirm('Reset every saved garden and start again? This cannot be undone.')) return
     void playSound('button-tap')
-    const next = resetGameProgress()
-    setCompleted(next.completed)
+    clearGardenData()
+    const empty = createEmptyGarden()
+    gardenRef.current = empty
+    setGarden(empty)
     setSelected(null)
-    setStep(next.step)
+    setPlantMessage('Garden reset.')
+    setStep('choose')
   }
 
   const useTouchFallback = () => {
     if (step === 'grow') {
       stopVoice()
-      void playSound('sprout')
+      startGrowth()
     } else if (step === 'sun') {
-      void playSound('sunlight')
+      finishSunStage()
     } else if (step === 'rain') {
-      void playSound('rain')
+      finishRainStage()
     } else {
       void playSound('button-tap')
     }
-    completeCurrentStep()
   }
 
   if (!assets) {
@@ -206,17 +359,29 @@ function App() {
           <p className="eyebrow">Bloom With Me</p>
           <h1>{assetError ? 'The garden could not open.' : 'Opening the garden…'}</h1>
           <p>{assetError ? 'Please refresh and try again.' : 'Gathering the storybook artwork.'}</p>
-          {assetError && (
-            <button className="primary-button" type="button" onClick={() => window.location.reload()}>
-              Try again
-            </button>
-          )}
+          {assetError && <button className="primary-button" type="button" onClick={() => window.location.reload()}>Try again</button>}
         </section>
       </main>
     )
   }
 
-  const availableFlowers = FLOWERS.filter((flower) => !completed.includes(flower.id))
+  const stageTitle = step === 'sun'
+    ? sunCelebrating
+      ? 'Sunlight ready'
+      : handDebug.currentGesture === 'open-palm'
+        ? `Hold still ${Math.round((sunHoldMs / SUN_HOLD_MS) * 100)}%`
+        : 'Open your hand'
+    : step === 'rain'
+      ? weatherState === 'cloudEntering'
+        ? 'A cloud is coming'
+        : weatherState === 'raining'
+          ? 'Gentle rain'
+          : weatherState === 'clearing'
+            ? 'The rain is resting'
+            : rainGuide
+      : step === 'grow' && growthStarted
+        ? 'Watch it grow'
+        : currentStepCopy?.title
   const gestureAsset = step === 'plant'
     ? assets.gestures.pinch
     : step === 'sun'
@@ -245,18 +410,20 @@ function App() {
             assets={assets}
             step="welcome"
             selected={null}
-            completed={[]}
+            garden={garden}
             planted={false}
             sunny={false}
-            raining={false}
-            grown={false}
+            watered={false}
+            growthStarted={false}
+            weatherState="clear"
+            reducedMotion={reducedMotion}
           />
           <div className="welcome-card">
             <p className="eyebrow">A calm garden game</p>
             <h1>Bloom With Me</h1>
             <p className="welcome-copy">Use your hand, your voice, or simply touch the screen.</p>
             <button className="primary-button" type="button" onClick={begin}>Start garden</button>
-            <p className="privacy-note">Camera and microphone are used only while you play.</p>
+            <p className="privacy-note">Camera and microphone are used only after you choose to turn them on.</p>
           </div>
         </section>
       )}
@@ -266,34 +433,17 @@ function App() {
           <header className="game-header">
             <div>
               <p className="game-brand">Bloom With Me</p>
-              <p className="game-progress">{completed.length} of 3 flowers</p>
+              <p className="game-progress">Garden flowers: {flowerCount}</p>
             </div>
             <div className="game-header__status">
-              <button
-                className="sound-status"
-                type="button"
-                aria-pressed={!muted}
-                aria-label={muted ? 'Turn sound on' : 'Mute sound'}
-                onClick={() => void toggleMuted()}
-              >
-                <span className="ui-icon-frame ui-icon-frame--trim" aria-hidden="true">
-                  <img src={assets.ui.sound} alt="" />
-                </span>
+              <button className="sound-status" type="button" aria-pressed={!muted} aria-label={muted ? 'Turn sound on' : 'Mute sound'} onClick={() => void toggleMuted()}>
+                <span className="ui-icon-frame ui-icon-frame--trim" aria-hidden="true"><AssetImage src={assets.ui.sound} alt="" /></span>
                 <span className="sound-status__label">Sound {muted ? 'off' : 'on'}</span>
               </button>
-              <div
-                className="progress-dots"
-                role="progressbar"
-                aria-label="Garden progress"
-                aria-valuemin={0}
-                aria-valuemax={FLOWERS.length}
-                aria-valuenow={completed.length}
-                aria-valuetext={`${completed.length} of 3 flowers complete`}
-              >
-                {FLOWERS.map((flower) => (
-                  <span key={flower.id} className={completed.includes(flower.id) ? 'is-complete' : ''} aria-hidden="true" />
-                ))}
-              </div>
+              <details className="garden-options">
+                <summary>Garden options</summary>
+                <button type="button" onClick={resetGarden}>Reset saved gardens</button>
+              </details>
             </div>
           </header>
 
@@ -302,19 +452,28 @@ function App() {
               assets={assets}
               step={step}
               selected={selected}
-              completed={completed}
-              availableFlowers={availableFlowers}
+              garden={garden}
+              onGardenPageChange={changeGardenPage}
+              onSelectFlower={selectFlower}
+              onPlantSeed={plantSeed}
               onPlantFlower={plantFlower}
+              onPlantRejected={(reason) => setPlantMessage(reason === 'occupied' ? 'That garden spot already has a flower. Try an empty spot.' : 'Bring the flower back to an empty soil spot.')}
               onSeedPickup={() => void playSound('seed-pickup')}
               onSeedDrop={() => void playSound('seed-drop')}
               onInteractionDebug={setInteractionDebug}
+              onSunTap={finishSunStage}
+              onCloudTap={finishRainStage}
               handCursor={cursor}
               pinchEvent={pinchEvent}
               pinchState={handDebug.pinchState}
               planted={planted}
               sunny={sunny}
-              raining={raining}
-              grown={grown}
+              sunExiting={sunExiting}
+              watered={watered}
+              growthStarted={growthStarted}
+              weatherState={weatherState}
+              reducedMotion={reducedMotion}
+              onGrowthComplete={finishGrowth}
             />
 
             <CameraPreview
@@ -333,137 +492,100 @@ function App() {
                 <>
                   <p className="eyebrow">Choose a seed</p>
                   <h2>Which flower will you grow?</h2>
-                  <p className="instruction-copy">Pinch or drag a storybook packet, then release its seed over the pot.</p>
-                  <p className={`touch-drag-hint ${fallbackReady ? 'touch-drag-hint--ready' : ''}`}>
-                    Use touch: Drag the seed packet to the pot.
-                  </p>
+                  <p className="instruction-copy">Move the butterfly over a packet and pinch. Or tap a packet.</p>
+                  <p className={`touch-drag-hint ${fallbackReady ? 'touch-drag-hint--ready' : ''}`}>Use touch: Tap a seed.</p>
+                  {plantMessage && <p className="gentle-status" role="status">{plantMessage}</p>}
                 </>
               )}
 
               {currentStepCopy && (
                 <>
                   <p className="eyebrow">{currentStepCopy.eyebrow}</p>
-                  <h2>{currentStepCopy.title}</h2>
-                  <p className="instruction-copy">{currentStepCopy.instruction}</p>
+                  <h2>{stageTitle}</h2>
+                  <p className="instruction-copy">
+                    {step === 'plant'
+                      ? 'Pinch and hold the loose seed, then release it over the pot.'
+                      : step === 'sun' && sunCelebrating
+                        ? 'Warm light is settling over the soil.'
+                        : step === 'rain' && weatherState === 'cloudEntering'
+                          ? 'Wait for the soft cloud to settle above the pot.'
+                          : step === 'rain' && weatherState === 'raining'
+                            ? 'The drops are landing only in the pot.'
+                            : step === 'rain' && weatherState === 'clearing'
+                              ? 'The last drops are finishing before the flower grows.'
+                              : step === 'rain'
+                                ? rainGestureArmed ? 'Keep your palm open and wave gently left and right.' : 'Relax your hand once, then wave.'
+                                : step === 'grow' && growthStarted
+                                  ? 'The flower is opening through all six gentle stages.'
+                                  : currentStepCopy.instruction}
+                  </p>
 
-                  {!(step === 'grow' && voiceStarted) && (
-                    <div className={`gesture-demo gesture-demo--${step}`} aria-hidden="true">
-                      <img src={gestureAsset} alt="" />
-                    </div>
+                  {!(step === 'grow' && (voiceStarted || growthStarted)) && (
+                    <div className={`gesture-demo gesture-demo--${step}`} aria-hidden="true"><AssetImage src={gestureAsset} alt="" /></div>
                   )}
 
-                  {step === 'grow' && !voiceStarted && (
-                    <button
-                      className="voice-button"
-                      type="button"
-                      onClick={() => {
-                        void playSound('button-tap')
-                        setVoiceStarted(true)
-                        void startVoice()
-                      }}
-                    >
-                      <span className="ui-icon-frame ui-icon-frame--trim" aria-hidden="true">
-                        <img src={assets.ui.microphone} alt="" />
-                      </span>
+                  {step === 'grow' && !voiceStarted && !growthStarted && (
+                    <button className="voice-button" type="button" onClick={() => { void playSound('button-tap'); setVoiceStarted(true); void startVoice() }}>
+                      <span className="ui-icon-frame ui-icon-frame--trim" aria-hidden="true"><AssetImage src={assets.ui.microphone} alt="" /></span>
                       Tap the microphone
                     </button>
                   )}
 
-                  {step === 'grow' && voiceStarted && (
+                  {step === 'grow' && voiceStarted && !growthStarted && (
                     <div className="voice-status" role="status">
                       <strong>{voiceFeedback}</strong>
                       {voiceStatus === 'calibrating' && <span className="voice-status__secondary">Finding the quiet around you…</span>}
-                      {voiceStatus === 'denied' && <span className="voice-status__secondary">Microphone is off. Tap to Grow still works.</span>}
-                      {voiceStatus === 'unavailable' && <span className="voice-status__secondary">Voice is not available here. Tap to Grow still works.</span>}
-                      {!speechSupported && voiceStatus !== 'denied' && voiceStatus !== 'unavailable' && (
-                        <span className="voice-status__secondary">Voice is not available here. A long sound still works.</span>
-                      )}
+                      {voiceStatus === 'denied' && <span className="voice-status__secondary">Microphone is off. Tap to grow still works.</span>}
+                      {voiceStatus === 'unavailable' && <span className="voice-status__secondary">Voice is not available here. Tap to grow still works.</span>}
+                      {!speechSupported && voiceStatus !== 'denied' && voiceStatus !== 'unavailable' && <span className="voice-status__secondary">A long sound still works here.</span>}
                       {voiceTranscript && <span className="voice-status__transcript">Heard: “{voiceTranscript}”</span>}
-                      <div
-                        className="voice-meter"
-                        role="progressbar"
-                        aria-label="Microphone level"
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-valuenow={Math.round(voiceLevel * 100)}
-                      >
+                      <div className="voice-meter" role="progressbar" aria-label="Microphone level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(voiceLevel * 100)}>
                         <span style={{ transform: `scaleX(${Math.max(0.03, voiceLevel)})` }} />
                         <i style={{ transform: `scaleX(${soundProgress})` }} />
                       </div>
-                      {(voiceStatus === 'calibrating' || voiceStatus === 'listening') && (
-                        <button className="recalibrate-button" type="button" onClick={recalibrateVoice}>Recalibrate</button>
-                      )}
-                      {(voiceStatus === 'denied' || voiceStatus === 'unavailable') && (
-                        <button
-                          className="recalibrate-button"
-                          type="button"
-                          onClick={() => void startVoice()}
-                        >
-                          Try microphone again
-                        </button>
-                      )}
+                      {(voiceStatus === 'calibrating' || voiceStatus === 'listening') && <button className="recalibrate-button" type="button" onClick={recalibrateVoice}>Recalibrate</button>}
+                      {(voiceStatus === 'denied' || voiceStatus === 'unavailable') && <button className="recalibrate-button" type="button" onClick={() => void startVoice()}>Try microphone again</button>}
                     </div>
                   )}
 
-                  <button
-                    className={`fallback-button ${step === 'grow' ? 'grow-touch-fallback' : ''} ${fallbackReady ? 'fallback-button--ready grow-touch-fallback--ready' : ''}`}
-                    type="button"
-                    onPointerDown={(event) => {
-                      if (event.pointerType === 'touch') event.preventDefault()
-                    }}
-                    onPointerUp={(event) => {
-                      if (event.pointerType !== 'touch' || touchFallbackPendingRef.current) return
-                      event.preventDefault()
-                      lastTouchFallbackRef.current = performance.now()
-                      touchFallbackPendingRef.current = true
-                      // Let the current touch/click sequence finish before replacing
-                      // this control with the next stage's control.
-                      touchFallbackTimerRef.current = window.setTimeout(() => {
-                        touchFallbackTimerRef.current = null
-                        touchFallbackPendingRef.current = false
-                        useTouchFallback()
-                      }, 80)
-                    }}
-                    onClick={(event) => {
-                      const followsHandledTouch = event.detail !== 0 && performance.now() - lastTouchFallbackRef.current < 600
-                      if (!followsHandledTouch) useTouchFallback()
-                    }}
-                  >
-                    <span className="ui-icon-frame" aria-hidden="true">
-                      <img src={assets.ui.help} alt="" />
-                    </span>
-                    {currentStepCopy.touchLabel}
-                  </button>
+                  {step === 'plant' ? (
+                    <p className={`touch-drag-hint ${fallbackReady ? 'touch-drag-hint--ready' : ''}`}>Use touch: Drag the seed.</p>
+                  ) : !(step === 'grow' && growthStarted) && (
+                    <button
+                      className={`fallback-button ${step === 'grow' ? 'grow-touch-fallback' : ''} ${fallbackReady ? 'fallback-button--ready grow-touch-fallback--ready' : ''}`}
+                      type="button"
+                      disabled={step === 'rain' && weatherState !== 'cloudy'}
+                      onPointerDown={(event) => { if (event.pointerType === 'touch') event.preventDefault() }}
+                      onPointerUp={(event) => {
+                        if (event.pointerType !== 'touch' || touchFallbackPendingRef.current) return
+                        event.preventDefault()
+                        lastTouchFallbackRef.current = performance.now()
+                        touchFallbackPendingRef.current = true
+                        touchFallbackTimerRef.current = window.setTimeout(() => {
+                          touchFallbackTimerRef.current = null
+                          touchFallbackPendingRef.current = false
+                          useTouchFallback()
+                        }, 80)
+                      }}
+                      onClick={(event) => {
+                        const followsHandledTouch = event.detail !== 0 && performance.now() - lastTouchFallbackRef.current < 600
+                        if (!followsHandledTouch) useTouchFallback()
+                      }}
+                    >
+                      <span className="ui-icon-frame" aria-hidden="true"><AssetImage src={assets.ui.help} alt="" /></span>
+                      {currentStepCopy.touchLabel}
+                    </button>
+                  )}
                 </>
               )}
 
-              {step === 'reveal' && selected && (
+              {step === 'place' && selected && (
                 <>
-                  <p className="eyebrow">It grew!</p>
-                  <h2>You helped the {selected.name.toLowerCase()} grow.</h2>
-                  <FlowerArt flower={selected} frames={assets.flowers[selected.id]} grown compact />
-                  <button className="primary-button" type="button" onClick={saveFlower}>
-                    Add to my garden
-                  </button>
-                </>
-              )}
-
-              {step === 'final' && (
-                <>
-                  <p className="eyebrow">Your garden is ready</p>
-                  <h2>Your garden is beautiful.</h2>
-                  <p className="instruction-copy">You helped every flower grow in your own way.</p>
-                  <div className="final-flowers">
-                    {FLOWERS.map((flower) => (
-                      <FlowerArt key={flower.id} flower={flower} frames={assets.flowers[flower.id]} grown compact />
-                    ))}
-                  </div>
-                  <button className="primary-button" type="button" onClick={resetGarden}>
-                    <span className="ui-icon-frame ui-icon-frame--trim-right" aria-hidden="true">
-                      <img src={assets.ui.restart} alt="" />
-                    </span>
-                    Grow again
-                  </button>
+                  <p className="eyebrow">Into the garden</p>
+                  <h2>Pinch the flower and plant it in your garden.</h2>
+                  <p className="instruction-copy">Hold the pinch while moving, then release over an empty soil spot.</p>
+                  <p className={`touch-drag-hint ${fallbackReady ? 'touch-drag-hint--ready' : ''}`}>Use touch: Drag the flower into the garden.</p>
+                  {plantMessage && <p className="gentle-status" role="status">{plantMessage}</p>}
                 </>
               )}
             </div>

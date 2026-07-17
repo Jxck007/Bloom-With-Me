@@ -30,8 +30,9 @@ Recommended final structure:
    - Open-palm recognition triggers a gentle rise and warm light animation.
 
 4. Rain stage
-   - Show rain-cloud.png above the pot.
-   - Wave recognition triggers the cloud and changes the pot to pot-watered.png.
+   - Show cloud-normal.png above the pot before the wave.
+   - Crossfade to cloud-rain.png and spawn individual droplet PNGs after the wave.
+   - Change the pot to pot-watered.png after localised rain finishes.
 
 5. Grow stage
    - Voice or sound triggers six growth frames:
@@ -39,9 +40,9 @@ Recommended final structure:
    - Crossfade each frame over roughly 300–450 ms.
    - Add a tiny upward scale and leaf sway, not a sudden image swap.
 
-6. Final garden
-   - Place the stage-06 image of each completed flower around the garden.
-   - Keep all completed flowers visible.
+6. Garden planting
+   - Drag the stage-06 image from the pot into an empty planting-grid.png slot.
+   - Keep every completed flower on versioned, unlimited garden pages.
 
 ## Important
 

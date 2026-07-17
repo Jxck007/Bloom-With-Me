@@ -1,8 +1,16 @@
 {
   "background": "/assets/backgrounds/garden-background.jpg",
   "foreground": "/assets/backgrounds/garden-foreground.png",
-  "sun": "/assets/weather/sun.png",
-  "cloud": "/assets/weather/rain-cloud.png",
+  "weather": {
+    "sun": "/assets/weather/sun.png",
+    "cloudNormal": "/assets/weather/cloud-normal.png",
+    "cloudRain": "/assets/weather/cloud-rain.png",
+    "droplets": {
+      "small": "/assets/weather/droplets/drop-small.png",
+      "medium": "/assets/weather/droplets/drop-medium.png",
+      "large": "/assets/weather/droplets/drop-large.png"
+    }
+  },
   "seeds": {
     "rose": {
       "packet": "/assets/seeds/rose-packet.png",
@@ -60,5 +68,11 @@
     "sound": "/assets/ui/sound.png",
     "restart": "/assets/ui/restart.png",
     "help": "/assets/ui/help.png"
+  },
+  "garden": {
+    "plantingGrid": "/assets/garden/planting-grid.png",
+    "columns": 4,
+    "rows": 3,
+    "slotsPerPage": 12
   }
 }

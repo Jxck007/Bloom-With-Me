@@ -16,7 +16,7 @@ test('game state completes one flower and begins the next seed', () => {
   assert.equal(planted.step, 'sun')
   assert.equal(completeGameStep(planted.step), 'rain')
   assert.equal(completeGameStep('rain'), 'grow')
-  assert.equal(completeGameStep('grow'), 'reveal')
+  assert.equal(completeGameStep('grow'), 'place')
 
   const saved = saveCompletedFlower([], 'rose')
   assert.deepEqual(saved.completed, ['rose'])
@@ -28,14 +28,14 @@ test('game state completes one flower and begins the next seed', () => {
   assert.equal(nextSeed.step, 'plant')
 })
 
-test('saving all three flowers completes the garden without duplicates', () => {
+test('saving flower choices stays repeatable and always returns to seed selection', () => {
   const final = saveCompletedFlower(['rose', 'sunflower'], 'lavender')
   assert.deepEqual(final.completed, ['rose', 'sunflower', 'lavender'])
-  assert.equal(final.step, 'final')
+  assert.equal(final.step, 'choose')
 
   const duplicate = saveCompletedFlower(final.completed, 'lavender')
-  assert.deepEqual(duplicate.completed, final.completed)
-  assert.equal(duplicate.step, 'final')
+  assert.deepEqual(duplicate.completed, ['rose', 'sunflower', 'lavender', 'lavender'])
+  assert.equal(duplicate.step, 'choose')
 })
 
 test('reset clears selection, completion data, and returns to seed choice', () => {
@@ -45,5 +45,5 @@ test('reset clears selection, completion data, and returns to seed choice', () =
 test('touch continuation uses the same sunlight, rain, and grow transitions', () => {
   assert.equal(completeGameStep('sun'), 'rain')
   assert.equal(completeGameStep('rain'), 'grow')
-  assert.equal(completeGameStep('grow'), 'reveal')
+  assert.equal(completeGameStep('grow'), 'place')
 })

@@ -4,8 +4,16 @@ import type { FlowerId } from './flowers'
 export interface AssetMap {
   background: string
   foreground: string
-  sun: string
-  cloud: string
+  weather: {
+    sun: string
+    cloudNormal: string
+    cloudRain: string
+    droplets: {
+      small: string
+      medium: string
+      large: string
+    }
+  }
   seeds: Record<FlowerId, { packet: string; seed: string }>
   pots: {
     empty: string
@@ -25,6 +33,12 @@ export interface AssetMap {
     sound: string
     restart: string
     help: string
+  }
+  garden: {
+    plantingGrid: string
+    columns: number
+    rows: number
+    slotsPerPage: number
   }
 }
 

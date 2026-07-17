@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import type { HandDebug, TrackingStatus } from '../hooks/useHandTracking'
 import type { SeedInteractionDebug } from '../types/interaction'
+import { AssetImage } from './AssetImage'
 
 const CONNECTIONS: [number, number][] = [
   [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8],
@@ -145,7 +146,7 @@ export function CameraPreview({
         aria-label={expanded ? 'Collapse camera preview' : 'Expand camera preview'}
         onClick={() => setExpanded((value) => !value)}
       >
-        <img src={cameraIcon} alt="" />
+        <AssetImage src={cameraIcon} alt="" />
       </button>
 
       <div className="camera-preview__viewport" ref={viewportRef}>

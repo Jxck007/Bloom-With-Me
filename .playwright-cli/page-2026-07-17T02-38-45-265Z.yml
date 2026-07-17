@@ -1,0 +1,27 @@
+- main [ref=e3]:
+  - button "Reduce motion" [ref=e8] [cursor=pointer]
+  - generic [ref=e17]:
+    - generic [ref=e18]:
+      - generic [ref=e19]:
+        - paragraph [ref=e20]: Bloom With Me
+        - paragraph [ref=e21]: "Garden flowers: 0"
+      - generic [ref=e22]:
+        - button "Turn sound on" [ref=e23] [cursor=pointer]:
+          - generic [ref=e25]: Sound off
+        - group [ref=e26]:
+          - generic "Garden options" [ref=e27] [cursor=pointer]
+    - generic [ref=e28]:
+      - generic [ref=e29]:
+        - button "Drag the loose Sunflower seed into the pot" [ref=e50]:
+          - img "Sunflower seed"
+        - generic:
+          - img "Empty flower pot"
+      - complementary "Hand camera controls" [ref=e37]:
+        - button "Expand camera preview" [ref=e38] [cursor=pointer]
+        - button "Enable Camera" [ref=e42] [cursor=pointer]
+        - status [ref=e43]: Camera inactive
+      - generic [ref=e45]:
+        - paragraph [ref=e51]: Plant the seed
+        - heading "Pinch your fingers" [level=2] [ref=e52]
+        - paragraph [ref=e53]: Pinch and hold the loose seed, then release it over the pot.
+        - paragraph [ref=e55]: "Use touch: Drag the seed."

@@ -1,6 +1,6 @@
 import type { FlowerId } from '../data/flowers'
 
-export type GameStep = 'welcome' | 'choose' | 'plant' | 'sun' | 'rain' | 'grow' | 'reveal' | 'final'
+export type GameStep = 'welcome' | 'choose' | 'plant' | 'sun' | 'rain' | 'grow' | 'place'
 
 export interface SeedSelectionState {
   selected: FlowerId | null
@@ -23,16 +23,16 @@ export function completeGameStep(step: GameStep): GameStep {
   if (step === 'plant') return 'sun'
   if (step === 'sun') return 'rain'
   if (step === 'rain') return 'grow'
-  if (step === 'grow') return 'reveal'
+  if (step === 'grow') return 'place'
   return step
 }
 
-export function saveCompletedFlower(completed: FlowerId[], flowerId: FlowerId, flowerCount = 3): SavedFlowerState {
-  const nextCompleted = completed.includes(flowerId) ? [...completed] : [...completed, flowerId]
+export function saveCompletedFlower(completed: FlowerId[], flowerId: FlowerId): SavedFlowerState {
+  const nextCompleted = [...completed, flowerId]
   return {
     completed: nextCompleted,
     selected: null,
-    step: nextCompleted.length >= flowerCount ? 'final' : 'choose',
+    step: 'choose',
   }
 }
 
