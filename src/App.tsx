@@ -27,9 +27,20 @@ import {
   type GrowGesturePhase,
   type GrowPoseObservation,
 } from './gesture/gestureMath'
+import {
+  initialSunHoldTracker,
+  SUN_HOLD_MAX_MS,
+  SUN_HOLD_MIN_MS,
+  updateSunHold,
+} from './gesture/sunHoldMath'
 import type { SeedInteractionDebug } from './types/interaction'
 
-const SUN_HOLD_MS = 900
+const SUN_HOLD_DURATION_MS = 5000
+const configuredSunHoldDuration = Number(import.meta.env.VITE_SUN_HOLD_DURATION_MS)
+const ACTIVE_SUN_HOLD_DURATION_MS = Number.isFinite(configuredSunHoldDuration)
+  ? Math.min(SUN_HOLD_MAX_MS, Math.max(SUN_HOLD_MIN_MS, configuredSunHoldDuration))
+  : SUN_HOLD_DURATION_MS
+const SUN_GESTURE_COOLDOWN_MS = 1250
 const SUN_RESULT_MS = 1_450
 const SUN_EXIT_MS = 500
 const RAIN_DURATION_MS = 4_800
@@ -97,7 +108,8 @@ function App() {
   const touchFallbackTimerRef = useRef<number | null>(null)
   const transitionTimersRef = useRef(new Set<number>())
   const plantingTimerRef = useRef<number | null>(null)
-  const palmHoldStartedRef = useRef<number | null>(null)
+  const sunHoldTrackerRef = useRef(initialSunHoldTracker())
+  const sunGestureCooldownUntilRef = useRef(0)
   const rainMotionRef = useRef({ x: null as number | null, direction: 0, changes: 0 })
   const stepRef = useRef<GameStep>(step)
   const weatherStateRef = useRef<WeatherState>(weatherState)
@@ -176,7 +188,8 @@ function App() {
   const finishSunStage = useCallback(() => {
     if (stepRef.current !== 'sun' || weatherBusyRef.current) return
     weatherBusyRef.current = true
-    setSunHoldMs(SUN_HOLD_MS)
+    sunGestureCooldownUntilRef.current = performance.now() + SUN_GESTURE_COOLDOWN_MS
+    setSunHoldMs(ACTIVE_SUN_HOLD_DURATION_MS)
     setSunExiting(false)
     setSunCelebrating(true)
     void playSound('sunlight')
@@ -213,20 +226,29 @@ function App() {
   }, [playSound, scheduleTransition])
 
   useEffect(() => {
-    if (step !== 'sun' || sunCelebrating || !handDebug.handVisible || handDebug.currentGesture !== 'open-palm') {
-      palmHoldStartedRef.current = null
-      if (step === 'sun' && !sunCelebrating) setSunHoldMs(0)
+    if (step !== 'sun') {
+      sunHoldTrackerRef.current = initialSunHoldTracker()
+      setSunHoldMs(0)
       return
     }
+    if (sunCelebrating) return
+
     const now = performance.now()
-    if (palmHoldStartedRef.current === null) palmHoldStartedRef.current = now
-    const heldFor = now - palmHoldStartedRef.current
-    setSunHoldMs(Math.min(SUN_HOLD_MS, heldFor))
-    if (heldFor >= SUN_HOLD_MS) finishSunStage()
+    const validOpenPalm = handDebug.handVisible && handDebug.currentGesture === 'open-palm'
+    const next = updateSunHold(
+      sunHoldTrackerRef.current,
+      validOpenPalm,
+      now,
+      ACTIVE_SUN_HOLD_DURATION_MS,
+    )
+    sunHoldTrackerRef.current = next
+    setSunHoldMs(next.progressMs)
+    if (next.completed) finishSunStage()
   }, [finishSunStage, handDebug.currentGesture, handDebug.handVisible, handDebug.landmarks, step, sunCelebrating])
 
   useEffect(() => {
     if (step !== 'rain' || weatherState !== 'cloudy' || rainGestureArmed) return
+    if (performance.now() < sunGestureCooldownUntilRef.current) return
     const neutralGesture = !handDebug.handVisible
       || (handDebug.currentGesture !== 'open-palm' && handDebug.currentGesture !== 'wave' && handDebug.currentGesture !== 'pinch')
     if (neutralGesture) {
@@ -434,12 +456,16 @@ function App() {
     )
   }
 
+  const sunProgress = Math.min(1, sunHoldMs / ACTIVE_SUN_HOLD_DURATION_MS)
+  const sunProgressPercent = Math.round(sunProgress * 100)
   const stageTitle = step === 'sun'
     ? sunCelebrating
       ? 'Sunlight ready'
-      : handDebug.currentGesture === 'open-palm'
-        ? `Hold still ${Math.round((sunHoldMs / SUN_HOLD_MS) * 100)}%`
-        : 'Open your hand'
+      : sunProgress >= 0.88
+        ? 'Almost there'
+        : sunProgress > 0
+          ? 'Keep holding'
+          : 'Open your hand'
     : step === 'rain'
       ? weatherState === 'cloudEntering'
         ? 'A cloud is coming'
@@ -590,7 +616,7 @@ function App() {
               onDisable={disableCamera}
             />
 
-            <div className="instruction-panel" aria-live="polite">
+            <div className={`instruction-panel ${step === 'place' ? 'instruction-panel--placement' : ''}`} aria-live="polite">
               {step === 'choose' && (
                 <>
                   <p className="eyebrow">Choose a seed</p>
@@ -624,6 +650,20 @@ function App() {
                                     ? 'Or say Grow, make a sound, or tap below.'
                                   : currentStepCopy.instruction}
                   </p>
+
+                  {step === 'sun' && !sunCelebrating && (
+                    <div
+                      className="sun-hold-progress"
+                      role="progressbar"
+                      aria-label="Open-palm sunlight progress"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={sunProgressPercent}
+                    >
+                      <span style={{ transform: `scaleX(${sunProgress})` }} />
+                      <small>{sunProgressPercent}%</small>
+                    </div>
+                  )}
 
                   {!(step === 'grow' && growthStarted) && (
                     <div className={`gesture-demo gesture-demo--${step}`} aria-hidden="true"><AssetImage src={gestureAsset} alt="" /></div>
@@ -684,9 +724,9 @@ function App() {
               {step === 'place' && selected && (
                 <>
                   <p className="eyebrow">Into the garden</p>
-                  <h2>Pinch the flower and place it in the garden.</h2>
-                  <p className="instruction-copy">Release near an empty soil spot. The flower will gently snap in.</p>
-                  <p className={`touch-drag-hint ${fallbackReady ? 'touch-drag-hint--ready' : ''}`}>Use touch: Drag the flower into the garden.</p>
+                  <h2>Plant your flower</h2>
+                  <p className="instruction-copy">Pinch the flower, move it to an empty spot, then open your hand.</p>
+                  <p className={`touch-drag-hint ${fallbackReady ? 'touch-drag-hint--ready' : ''}`}>Drag the flower to an empty spot.</p>
                   {plantMessage && <p className="gentle-status" role="status">{plantMessage}</p>}
                 </>
               )}

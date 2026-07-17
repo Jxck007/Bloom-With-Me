@@ -9,6 +9,7 @@ import {
   type TouchEvent as ReactTouchEvent,
 } from 'react'
 import type { AssetMap } from '../data/assets'
+import { FLOWER_GROWTH_LAYOUT, GARDEN_FLOWER_TYPE_SCALE } from '../data/flowerLayout'
 import type { FlowerChoice, FlowerId } from '../data/flowers'
 import { FLOWERS } from '../data/flowers'
 import type { GameStep } from '../game/gameState'
@@ -134,6 +135,7 @@ export function GardenScene({
   const [gridRevealed, setGridRevealed] = useState(false)
   const [keyboardPlantHeld, setKeyboardPlantHeld] = useState(false)
   const [candidateSlotIndex, setCandidateSlotIndex] = useState<number | null>(null)
+  const [sunAnchor, setSunAnchor] = useState<{ x: number; y: number } | null>(null)
 
   const activePage = garden.pages[garden.activePageIndex]
   const occupiedSlots = useMemo(() => new Set(activePage.flowers.map((flower) => flower.slotIndex)), [activePage.flowers])
@@ -153,6 +155,7 @@ export function GardenScene({
   const showClouds = step === 'rain'
   const raining = weatherState === 'raining'
   const pot = watered ? assets.pots.watered : planted ? assets.pots.planted : assets.pots.empty
+  const growthLayout = selected ? FLOWER_GROWTH_LAYOUT[selected.id] : null
   const preloadSources = useMemo(() => {
     const flowerFrames = selected ? assets.flowers[selected.id] : []
     if (step === 'choose') return FLOWERS.flatMap((flower) => [assets.seeds[flower.id].packet, assets.seeds[flower.id].seed])
@@ -171,6 +174,57 @@ export function GardenScene({
       image.src = src
     })
   }, [preloadSources])
+
+  useEffect(() => {
+    if (!showSun) {
+      setSunAnchor(null)
+      return
+    }
+    const scene = sceneRef.current
+    const potElement = potRef.current
+    if (!scene || !potElement) return
+
+    const updateAnchor = () => {
+      const sceneBounds = scene.getBoundingClientRect()
+      const potBounds = potElement.getBoundingClientRect()
+      if (!sceneBounds.width || !sceneBounds.height || !potBounds.width || !potBounds.height) return
+
+      const mobile = sceneBounds.width <= 600
+      const tablet = !mobile && sceneBounds.width <= 900
+      const sunWidth = mobile
+        ? Math.min(155, Math.max(115, sceneBounds.width * 0.36))
+        : tablet
+          ? Math.min(190, Math.max(145, sceneBounds.width * 0.2))
+          : Math.min(220, Math.max(175, sceneBounds.width * 0.15))
+      const distanceAboveSoil = mobile
+        ? Math.min(195, Math.max(145, sceneBounds.height * 0.27))
+        : tablet
+          ? Math.min(245, Math.max(190, sceneBounds.height * 0.3))
+          : Math.min(290, Math.max(230, sceneBounds.height * 0.39))
+      const horizontalOffset = mobile ? 30 : tablet ? 35 : 40
+      const soilX = potBounds.left - sceneBounds.left + potBounds.width / 2
+      const soilY = potBounds.top - sceneBounds.top + potBounds.height * 0.3
+      const next = {
+        x: Math.min(sceneBounds.width - sunWidth / 2 - 12, Math.max(sunWidth / 2 + 12, soilX + horizontalOffset)),
+        y: Math.min(sceneBounds.height - sunWidth / 2 - 12, Math.max(sunWidth / 2 + 16, soilY - distanceAboveSoil)),
+      }
+      setSunAnchor((current) => current
+        && Math.abs(current.x - next.x) < 0.5
+        && Math.abs(current.y - next.y) < 0.5
+        ? current
+        : next)
+    }
+
+    updateAnchor()
+    const observer = new ResizeObserver(updateAnchor)
+    observer.observe(scene)
+    observer.observe(potElement)
+    window.addEventListener('resize', updateAnchor)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', updateAnchor)
+    }
+  }, [showSun])
 
   const updateDrag = useCallback((next: DragState) => {
     dragRef.current = next
@@ -480,9 +534,18 @@ export function GardenScene({
       <AssetImage className="garden-scene__background" src={assets.background} alt="" width="1696" height="965" />
 
       {showSun && (
-        <button className={`garden-weather-action garden-weather-action--sun ${sunny ? 'is-active' : ''} ${sunExiting ? 'is-exiting' : ''}`} type="button" onClick={onSunTap} aria-label="Tap the sun to warm the planted seed">
+        <button
+          className={`garden-weather-action garden-weather-action--sun ${sunny ? 'is-active' : ''} ${sunExiting ? 'is-exiting' : ''}`}
+          style={sunAnchor ? {
+            '--sun-anchor-x': `${sunAnchor.x}px`,
+            '--sun-anchor-y': `${sunAnchor.y}px`,
+          } as CSSProperties : undefined}
+          type="button"
+          onClick={onSunTap}
+          aria-label="Tap the sun to warm the planted seed"
+        >
           {assets.weather.sunRays && (
-            <AssetImage className="garden-weather garden-weather--sun-rays" src={assets.weather.sunRays} alt="" aria-hidden="true" />
+            <AssetImage className="garden-weather garden-weather--sun-rays" src={assets.weather.sunRays} alt="" aria-hidden="true" width="1024" height="1024" />
           )}
           <AssetImage className="garden-weather garden-weather--sun" src={assets.weather.sun} alt="" width="1188" height="1164" />
         </button>
@@ -540,6 +603,7 @@ export function GardenScene({
                   left: `${slot.xPercent}%`,
                   top: `${slot.yPercent}%`,
                   '--slot-scale': slot.scale,
+                  '--type-scale': GARDEN_FLOWER_TYPE_SCALE[flower.flowerType],
                   zIndex: 12 + slot.row,
                 } as CSSProperties}
               >
@@ -636,7 +700,14 @@ export function GardenScene({
       {!['welcome', 'choose'].includes(step) && (
         <div className="pot-area">
           {selected && step === 'grow' && growthStarted && onGrowthComplete && (
-            <div className="pot-growth-viewport">
+            <div
+              className="pot-growth-viewport"
+              style={growthLayout ? {
+                '--growth-width': growthLayout.width,
+                '--growth-max-height': growthLayout.maxHeight,
+                '--growth-soil-crop': growthLayout.soilCrop,
+              } as CSSProperties : undefined}
+            >
               <FlowerGrowthSequence flower={selected} frames={assets.flowers[selected.id]} active onComplete={onGrowthComplete} />
             </div>
           )}
