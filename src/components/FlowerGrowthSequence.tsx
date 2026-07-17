@@ -2,16 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FlowerChoice } from '../data/flowers'
 import { AssetImage } from './AssetImage'
 
-const PRODUCTION_FLOWER_GROWTH_TOTAL_MS = 30_000
+const PRODUCTION_FLOWER_GROWTH_TOTAL_MS = 15_000
 const developmentGrowthMs = Number(import.meta.env.VITE_FLOWER_GROWTH_TOTAL_MS)
 
 export const FLOWER_GROWTH_TOTAL_MS = import.meta.env.DEV && Number.isFinite(developmentGrowthMs) && developmentGrowthMs >= 600
   ? developmentGrowthMs
   : PRODUCTION_FLOWER_GROWTH_TOTAL_MS
 
-// Six deliberately unhurried story beats totalling 30 seconds in production.
+// Six deliberately unhurried story beats totalling 15 seconds in production.
 const STAGE_WEIGHTS = [4_700, 4_700, 4_700, 5_100, 5_200, 5_600] as const
-const STAGE_DURATIONS_MS = STAGE_WEIGHTS.map((duration) => duration / PRODUCTION_FLOWER_GROWTH_TOTAL_MS * FLOWER_GROWTH_TOTAL_MS)
+const STAGE_DURATIONS_MS = STAGE_WEIGHTS.map((duration) => duration / 30_000 * FLOWER_GROWTH_TOTAL_MS)
 
 interface FlowerGrowthSequenceProps {
   flower: FlowerChoice

@@ -411,6 +411,12 @@ button:focus-visible {
   background: #fff6e8;
 }
 
+.garden-scene--garden-view {
+  background:
+    radial-gradient(circle at 50% 22%, rgba(255, 251, 242, 0.34), transparent 30%),
+    #dbe6d2;
+}
+
 .garden-scene::after {
   content: "";
   position: absolute;
@@ -457,10 +463,25 @@ button:focus-visible {
   opacity: 0;
 }
 
+.garden-scene--garden-view .garden-scene__background,
+.garden-scene--garden-view .garden-scene__foreground {
+  opacity: 0.98;
+}
+
 .garden-scene--garden-view .pot-area,
 .garden-scene--garden-view .garden-seed-options {
   visibility: hidden;
   pointer-events: none;
+}
+
+.garden-scene--garden-view .garden-grid {
+  left: 50%;
+  top: 53%;
+  width: min(78%, 1100px);
+  background: rgba(255, 250, 243, 0.3);
+  border-radius: 32px;
+  padding: 12px;
+  box-shadow: 0 20px 42px rgba(77, 55, 44, 0.12);
 }
 
 .garden-scene--garden-view::after {

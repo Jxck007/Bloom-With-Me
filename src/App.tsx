@@ -715,13 +715,13 @@ function App() {
                             ? 'The drops are landing only in the pot.'
                             : step === 'rain' && weatherState === 'clearing'
                               ? 'The last drops are finishing before the flower grows.'
-                              : step === 'rain'
+                      : step === 'rain'
                                 ? rainGestureArmed ? 'Keep your palm open and wave gently left and right.' : 'Relax your hand once, then wave.'
                                 : step === 'grow' && growthStarted
                                   ? 'The flower is opening through all six gentle stages.'
                                   : step === 'grow'
                                     ? 'Or say Grow, make a sound, or tap below.'
-                                  : currentStepCopy.instruction}
+                                    : currentStepCopy.instruction}
                   </p>
 
                   {step === 'sun' && !sunCelebrating && (

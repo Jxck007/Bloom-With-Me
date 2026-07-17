@@ -155,6 +155,11 @@ export function GardenScene({
     }, null)?.slotIndex ?? null
   }, [slots])
   const showGardenGrid = gardenView || step === 'place'
+  const gardenSceneModeClass = gardenView
+    ? 'garden-scene--garden-view'
+    : showGardenGrid
+      ? 'garden-scene--placement'
+      : 'garden-scene--nursery'
   const showCalibration = import.meta.env.DEV && new URLSearchParams(window.location.search).has('calibrateGarden')
   const showSun = step === 'sun' && !gardenView
   const showClouds = step === 'rain' && !gardenView
@@ -553,9 +558,9 @@ export function GardenScene({
   return (
     <div
       ref={sceneRef}
-      className={`garden-scene garden-scene--${step} garden-scene--interaction-${drag.phase} ${showGardenGrid ? 'garden-scene--placement' : 'garden-scene--nursery'} ${gardenView ? 'garden-scene--garden-view' : ''} ${paused ? 'is-paused' : ''} ${sunny ? 'garden-scene--sunny' : ''} ${raining ? 'garden-scene--raining' : ''}`}
+      className={`garden-scene garden-scene--${step} garden-scene--interaction-${drag.phase} ${gardenSceneModeClass} ${paused ? 'is-paused' : ''} ${sunny ? 'garden-scene--sunny' : ''} ${raining ? 'garden-scene--raining' : ''}`}
       data-weather-state={weatherState}
-      data-scene={showGardenGrid ? 'placement' : 'nursery'}
+      data-scene={gardenView ? 'garden-view' : showGardenGrid ? 'placement' : 'nursery'}
       style={{ '--sunlight-progress': Math.max(0, Math.min(1, sunProgress)) } as CSSProperties}
     >
       <AssetImage className="garden-scene__background" src={assets.background} alt="" width="1696" height="965" />
