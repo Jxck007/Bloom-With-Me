@@ -2,14 +2,15 @@
   "background": "/assets/backgrounds/garden-background.jpg",
   "foreground": "/assets/backgrounds/garden-foreground.png",
   "weather": {
-    "sun": "/assets/weather/sun.png",
-    "cloudNormal": "/assets/weather/cloud-normal.png",
-    "cloudRain": "/assets/weather/cloud-rain.png",
-    "droplets": {
-      "small": "/assets/weather/droplets/drop-small.png",
-      "medium": "/assets/weather/droplets/drop-medium.png",
-      "large": "/assets/weather/droplets/drop-large.png"
-    }
+  "sun": "/assets/weather/sun.png",
+  "sunRays": "/assets/weather/sun-rays.png",
+  "cloudNormal": "/assets/weather/cloud-normal.png",
+  "cloudRain": "/assets/weather/cloud-rain.png",
+  "droplets": {
+    "small": "/assets/weather/droplets/drop-small.png",
+    "medium": "/assets/weather/droplets/drop-medium.png",
+    "large": "/assets/weather/droplets/drop-large.png"
+  }
   },
   "seeds": {
     "rose": {

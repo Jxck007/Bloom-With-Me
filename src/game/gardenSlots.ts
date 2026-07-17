@@ -33,3 +33,36 @@ export const GARDEN_SLOTS: GardenSlot[] = SLOT_CENTRES.flatMap((centres, row) =>
 export function slotWithOccupancy(occupiedSlots: ReadonlySet<number>): GardenSlot[] {
   return GARDEN_SLOTS.map((slot) => ({ ...slot, occupied: occupiedSlots.has(slot.slotIndex) }))
 }
+
+export function findMagneticGardenSlot(
+  xPercent: number,
+  yPercent: number,
+  occupiedSlots: ReadonlySet<number>,
+  radiusMultiplier = 1.6,
+): GardenSlot | null {
+  let closest: GardenSlot | null = null
+  let closestDistance = Number.POSITIVE_INFINITY
+  const radiusX = 7.2 * radiusMultiplier
+  const radiusY = 5.5 * radiusMultiplier
+
+  for (const slot of GARDEN_SLOTS) {
+    if (occupiedSlots.has(slot.slotIndex)) continue
+    const normalX = (xPercent - slot.xPercent) / radiusX
+    const normalY = (yPercent - slot.yPercent) / radiusY
+    const distance = normalX * normalX + normalY * normalY
+    if (distance <= 1 && distance < closestDistance) {
+      closest = slot
+      closestDistance = distance
+    }
+  }
+
+  return closest
+}
+
+export function findGardenSlotIncludingOccupied(
+  xPercent: number,
+  yPercent: number,
+  radiusMultiplier = 1.6,
+): GardenSlot | null {
+  return findMagneticGardenSlot(xPercent, yPercent, new Set<number>(), radiusMultiplier)
+}

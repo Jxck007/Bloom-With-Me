@@ -6,6 +6,7 @@ export interface AssetMap {
   foreground: string
   weather: {
     sun: string
+    sunRays?: string
     cloudNormal: string
     cloudRain: string
     droplets: {

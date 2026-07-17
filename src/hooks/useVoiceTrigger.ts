@@ -143,7 +143,7 @@ export function useVoiceTrigger(onTrigger: () => void) {
     setFeedback('Listening')
   }, [])
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (permittedStream?: MediaStream | null) => {
     if (sessionRef.current?.active || triggeredRef.current) return
     clearCompletionTimer()
     cleanupSession()
@@ -154,7 +154,7 @@ export function useVoiceTrigger(onTrigger: () => void) {
     setStatus('starting')
     setFeedback('Listening')
 
-    if (!navigator.mediaDevices?.getUserMedia) {
+    if (permittedStream === undefined && !navigator.mediaDevices?.getUserMedia) {
       setStatus('unavailable')
       setFeedback('Voice is not available here')
       return
@@ -177,10 +177,19 @@ export function useVoiceTrigger(onTrigger: () => void) {
     sessionRef.current = session
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        video: false,
-      })
+      const permittedTrack = permittedStream?.getAudioTracks().find((track) => track.readyState === 'live')
+      if (permittedStream !== undefined && !permittedTrack) {
+        cleanupSession()
+        setStatus('unavailable')
+        setFeedback('Voice is not available here')
+        return
+      }
+      const stream = permittedTrack
+        ? new MediaStream([permittedTrack.clone()])
+        : await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: false,
+        })
       if (!session.active || sessionRef.current !== session) {
         stopLiveTracks(stream)
         return

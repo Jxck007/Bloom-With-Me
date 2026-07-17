@@ -4,7 +4,9 @@ import { permissionFailure } from '../media/permissionState'
 import {
   advanceStablePinch,
   gestureCooldownReady,
+  fistScore,
   initialStablePinchTracker,
+  isFist,
   isOpenPalm,
   isWaving,
   openPalmScore,
@@ -245,12 +247,14 @@ export function useHandTracking() {
     const scores = {
       'open-palm': openPalmScore(landmarks),
       wave: waveScore(wristHistoryRef.current),
+      fist: fistScore(landmarks),
     }
     const raw = {
       'open-palm': isOpenPalm(landmarks),
       wave: isOpenPalm(landmarks) && isWaving(wristHistoryRef.current),
     }
     const selected = (['wave', 'open-palm'] as const).find((gesture) => raw[gesture])
+    const pose = selected ?? (isFist(landmarks) ? 'fist' : undefined)
 
     stableRef.current = updateGestureStability(stableRef.current, selected)
 
@@ -266,11 +270,11 @@ export function useHandTracking() {
     }
 
     const ratio = pinchRatio(landmarks)
-    const currentGesture = nextPinchState === 'pinching' ? 'pinch' : selected ?? 'hand-visible'
+    const currentGesture = nextPinchState === 'pinching' ? 'pinch' : pose ?? 'hand-visible'
     const gestureConfidence = nextPinchState === 'pinching'
       ? pinchScore(landmarks)
-      : selected
-        ? scores[selected]
+      : pose
+        ? scores[pose]
         : confidence
 
     setDebug({
@@ -337,6 +341,34 @@ export function useHandTracking() {
     frameRef.current = requestAnimationFrame(loop)
   }, [processLandmarks, resetTracking, setTrackingStatus, stopLoop, stopStream])
 
+  const activateCameraStream = useCallback(async (stream: MediaStream, token: number) => {
+    streamRef.current = stream
+    const video = videoRef.current
+    if (!video) throw new Error('Camera preview is unavailable')
+    video.srcObject = stream
+    await video.play()
+    await ensureLandmarker()
+
+    if (!mountedRef.current || token !== requestTokenRef.current) {
+      stopStream()
+      return false
+    }
+
+    stream.getVideoTracks()[0]?.addEventListener('ended', () => {
+      if (token === requestTokenRef.current && statusRef.current === 'active') {
+        setTrackingStatus('unavailable')
+        stopLoop()
+        stopStream()
+        resetTracking()
+      }
+    }, { once: true })
+
+    setDebug((current) => ({ ...current, delegate: delegateRef.current }))
+    setTrackingStatus('active')
+    startLoop()
+    return true
+  }, [ensureLandmarker, resetTracking, setTrackingStatus, startLoop, stopLoop, stopStream])
+
   const startCamera = useCallback(async (retrying: boolean) => {
     if (statusRef.current === 'requesting' || statusRef.current === 'retrying' || statusRef.current === 'active') return
     if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
@@ -367,30 +399,7 @@ export function useHandTracking() {
         return
       }
 
-      streamRef.current = stream
-      const video = videoRef.current
-      if (!video) throw new Error('Camera preview is unavailable')
-      video.srcObject = stream
-      await video.play()
-      await ensureLandmarker()
-
-      if (!mountedRef.current || token !== requestTokenRef.current) {
-        stopStream()
-        return
-      }
-
-      stream.getVideoTracks()[0]?.addEventListener('ended', () => {
-        if (token === requestTokenRef.current && statusRef.current === 'active') {
-          setTrackingStatus('unavailable')
-          stopLoop()
-          stopStream()
-          resetTracking()
-        }
-      }, { once: true })
-
-      setDebug((current) => ({ ...current, delegate: delegateRef.current }))
-      setTrackingStatus('active')
-      startLoop()
+      await activateCameraStream(stream, token)
     } catch (error) {
       stopLiveTracks(stream)
       if (streamRef.current === stream) stopStream()
@@ -398,9 +407,36 @@ export function useHandTracking() {
       setTrackingStatus(permissionFailure(error) === 'denied' ? 'permission-denied' : 'unavailable')
       resetTracking()
     }
-  }, [ensureLandmarker, resetTracking, setTrackingStatus, startLoop, stopLoop, stopStream])
+  }, [activateCameraStream, resetTracking, setTrackingStatus, stopLoop, stopStream])
+
+  const startCameraWithStream = useCallback(async (source: MediaStream) => {
+    if (statusRef.current === 'requesting' || statusRef.current === 'retrying' || statusRef.current === 'active') return
+    const sourceTrack = source.getVideoTracks().find((track) => track.readyState === 'live')
+    if (!sourceTrack) {
+      setTrackingStatus('unavailable')
+      return
+    }
+
+    requestTokenRef.current += 1
+    const token = requestTokenRef.current
+    stopLoop()
+    stopStream()
+    resetTracking()
+    setTrackingStatus('requesting')
+    const stream = new MediaStream([sourceTrack.clone()])
+    try {
+      await activateCameraStream(stream, token)
+    } catch {
+      stopLiveTracks(stream)
+      if (streamRef.current === stream) stopStream()
+      if (!mountedRef.current || token !== requestTokenRef.current) return
+      setTrackingStatus('unavailable')
+      resetTracking()
+    }
+  }, [activateCameraStream, resetTracking, setTrackingStatus, stopLoop, stopStream])
 
   const enableCamera = useCallback(() => startCamera(false), [startCamera])
+  const enableCameraWithStream = useCallback((stream: MediaStream) => startCameraWithStream(stream), [startCameraWithStream])
   const retryCamera = useCallback(() => startCamera(true), [startCamera])
   const disableCamera = useCallback(() => {
     requestTokenRef.current += 1
@@ -439,6 +475,7 @@ export function useHandTracking() {
     pinchEvent,
     debug,
     enableCamera,
+    enableCameraWithStream,
     retryCamera,
     disableCamera,
   }

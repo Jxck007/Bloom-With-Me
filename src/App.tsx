@@ -18,8 +18,15 @@ import {
   type GardenData,
 } from './game/gardenStorage'
 import { useFallbackTimer } from './hooks/useFallbackTimer'
-import { useHandTracking } from './hooks/useHandTracking'
+import { useHandTracking, type TrackingStatus } from './hooks/useHandTracking'
+import { useMediaPermissions } from './hooks/useMediaPermissions'
 import { useVoiceTrigger } from './hooks/useVoiceTrigger'
+import {
+  initialGrowGestureTracker,
+  updateCloseOpenGrow,
+  type GrowGesturePhase,
+  type GrowPoseObservation,
+} from './gesture/gestureMath'
 import type { SeedInteractionDebug } from './types/interaction'
 
 const SUN_HOLD_MS = 900
@@ -55,9 +62,9 @@ const STEP_COPY: Record<Exclude<GameStep, 'welcome' | 'choose' | 'place'>, {
   },
   grow: {
     eyebrow: 'Help it grow',
-    title: 'Say “Grow”',
-    instruction: 'Say grow, bloom, flower, or make one clear, steady sound.',
-    touchLabel: 'Tap to grow',
+    title: 'Close your hand, then open it.',
+    instruction: 'Or say Grow, make a sound, or tap below.',
+    touchLabel: 'Tap to Grow',
   },
 }
 
@@ -67,6 +74,8 @@ function App() {
   const [selected, setSelected] = useState<FlowerChoice | null>(null)
   const [garden, setGarden] = useState<GardenData>(loadGardenData)
   const [voiceStarted, setVoiceStarted] = useState(false)
+  const [growGesturePhase, setGrowGesturePhase] = useState<GrowGesturePhase>('waitingForHand')
+  const [isFullscreen, setIsFullscreen] = useState(Boolean(document.fullscreenElement))
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
   const [sunCelebrating, setSunCelebrating] = useState(false)
   const [sunExiting, setSunExiting] = useState(false)
@@ -97,7 +106,9 @@ function App() {
   const growthStartedRef = useRef(false)
   const weatherBusyRef = useRef(false)
   const placingRef = useRef(false)
+  const growGestureRef = useRef(initialGrowGestureTracker())
   const { muted, play: playSound, toggleMuted } = useAudioManager()
+  const media = useMediaPermissions()
 
   stepRef.current = step
   weatherStateRef.current = weatherState
@@ -112,8 +123,7 @@ function App() {
     gestureEvent,
     pinchEvent,
     debug: handDebug,
-    enableCamera,
-    retryCamera,
+    enableCameraWithStream,
     disableCamera,
   } = useHandTracking()
 
@@ -144,11 +154,24 @@ function App() {
     soundProgress,
     transcript: voiceTranscript,
     feedback: voiceFeedback,
-    speechSupported,
     start: startVoice,
     stop: stopVoice,
-    recalibrate: recalibrateVoice,
   } = useVoiceTrigger(startGrowth)
+
+  useEffect(() => {
+    if (step !== 'grow' || growthStarted) return
+    const observation: GrowPoseObservation = !handDebug.handVisible
+      ? 'none'
+      : handDebug.currentGesture === 'fist'
+        ? 'fist'
+        : handDebug.currentGesture === 'open-palm'
+          ? 'open'
+          : 'other'
+    const next = updateCloseOpenGrow(growGestureRef.current, observation, performance.now())
+    growGestureRef.current = next.tracker
+    setGrowGesturePhase((current) => current === next.tracker.phase ? current : next.tracker.phase)
+    if (next.confirmed) startGrowth()
+  }, [growthStarted, handDebug.currentGesture, handDebug.handVisible, handDebug.landmarks, startGrowth, step])
 
   const finishSunStage = useCallback(() => {
     if (stepRef.current !== 'sun' || weatherBusyRef.current) return
@@ -243,15 +266,30 @@ function App() {
       setVoiceStarted(false)
       setGrowthStarted(false)
       growthStartedRef.current = false
+      growGestureRef.current = initialGrowGestureTracker()
+      setGrowGesturePhase('waitingForHand')
       stopVoice()
     } else if (growthStarted) {
       stopVoice()
+    } else if (media.microphone === 'ready' && media.stream && !voiceStarted) {
+      setVoiceStarted(true)
+      void startVoice(media.stream)
     }
-  }, [growthStarted, step, stopVoice])
+  }, [growthStarted, media.microphone, media.stream, startVoice, step, stopVoice, voiceStarted])
 
   useEffect(() => {
     document.documentElement.dataset.reducedMotion = String(reducedMotion)
   }, [reducedMotion])
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement))
+      requestAnimationFrame(() => window.dispatchEvent(new Event('resize')))
+      window.setTimeout(() => window.dispatchEvent(new Event('resize')), 160)
+    }
+    document.addEventListener('fullscreenchange', onFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange)
+  }, [])
 
   useEffect(() => () => {
     if (touchFallbackTimerRef.current !== null) window.clearTimeout(touchFallbackTimerRef.current)
@@ -273,10 +311,41 @@ function App() {
     ? STEP_COPY[step as 'plant' | 'sun' | 'rain' | 'grow']
     : null, [step])
 
-  const begin = () => {
+  const beginTouchOnly = () => {
     void playSound('button-tap')
     setStep('choose')
   }
+
+  const beginHandsAndVoice = async () => {
+    if (media.status === 'requesting') return
+    void playSound('button-tap')
+    const result = await media.request()
+    if (result.camera === 'ready' && result.stream) void enableCameraWithStream(result.stream)
+    setStep('choose')
+  }
+
+  const fullscreenSupported = typeof document.documentElement.requestFullscreen === 'function'
+    && typeof document.exitFullscreen === 'function'
+
+  const toggleFullscreen = async () => {
+    if (!fullscreenSupported) return
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen()
+      else await document.documentElement.requestFullscreen()
+    } catch {
+      // Fullscreen may be blocked by browser or embedding policy; gameplay remains available.
+    }
+  }
+
+  const cameraPreviewStatus: TrackingStatus = handStatus !== 'not-started'
+    ? handStatus
+    : media.camera === 'requesting'
+      ? 'requesting'
+      : media.camera === 'denied'
+        ? 'permission-denied'
+        : media.camera === 'unavailable'
+          ? 'unavailable'
+          : 'not-started'
 
   const selectFlower = (flower: FlowerChoice) => {
     const prepared = ensureActivePageHasSpace(gardenRef.current)
@@ -388,21 +457,28 @@ function App() {
       ? assets.gestures.palm
       : step === 'rain'
         ? assets.gestures.wave
-        : assets.ui.microphone
+        : assets.gestures.palm
+  const growGestureCopy = growGesturePhase === 'fistHeld' || growGesturePhase === 'waitingForOpen'
+    ? 'Now open it'
+    : growGesturePhase === 'growConfirmed' || growthStarted
+      ? 'Wonderful — let’s grow!'
+      : 'Close your hand'
 
   return (
     <main className="app-shell">
-      <button
-        className="motion-toggle"
-        type="button"
-        onClick={() => {
-          void playSound('button-tap')
-          setReducedMotion((value) => !value)
-        }}
-        aria-pressed={reducedMotion}
-      >
-        {reducedMotion ? 'Gentle motion on' : 'Reduce motion'}
-      </button>
+      {step === 'welcome' && (
+        <button
+          className="motion-toggle"
+          type="button"
+          onClick={() => {
+            void playSound('button-tap')
+            setReducedMotion((value) => !value)
+          }}
+          aria-pressed={reducedMotion}
+        >
+          {reducedMotion ? 'Gentle motion on' : 'Reduce motion'}
+        </button>
+      )}
 
       {step === 'welcome' && (
         <section className="welcome-screen">
@@ -421,9 +497,17 @@ function App() {
           <div className="welcome-card">
             <p className="eyebrow">A calm garden game</p>
             <h1>Bloom With Me</h1>
-            <p className="welcome-copy">Use your hand, your voice, or simply touch the screen.</p>
-            <button className="primary-button" type="button" onClick={begin}>Start garden</button>
-            <p className="privacy-note">Camera and microphone are used only after you choose to turn them on.</p>
+            <p className="welcome-copy">The camera supports hand gestures. The microphone listens for voice and sound. Touch always works too.</p>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => void beginHandsAndVoice()}
+              disabled={media.status === 'requesting'}
+            >
+              {media.status === 'requesting' ? 'Opening camera & microphone…' : 'Start Hands & Voice'}
+            </button>
+            <button className="touch-only-button" type="button" onClick={beginTouchOnly}>Continue with touch only</button>
+            <p className="privacy-note">Camera and microphone are requested together only after you press Start Hands & Voice.</p>
           </div>
         </section>
       )}
@@ -436,10 +520,29 @@ function App() {
               <p className="game-progress">Garden flowers: {flowerCount}</p>
             </div>
             <div className="game-header__status">
-              <button className="sound-status" type="button" aria-pressed={!muted} aria-label={muted ? 'Turn sound on' : 'Mute sound'} onClick={() => void toggleMuted()}>
-                <span className="ui-icon-frame ui-icon-frame--trim" aria-hidden="true"><AssetImage src={assets.ui.sound} alt="" /></span>
-                <span className="sound-status__label">Sound {muted ? 'off' : 'on'}</span>
-              </button>
+              <div className="game-controls" aria-label="Game display and sound controls">
+                <button className="sound-status" type="button" aria-pressed={!muted} aria-label={muted ? 'Turn sound on' : 'Mute sound'} onClick={() => void toggleMuted()}>
+                  <span className="ui-icon-frame ui-icon-frame--trim" aria-hidden="true"><AssetImage src={assets.ui.sound} alt="" /></span>
+                  <span className="sound-status__label">Sound {muted ? 'off' : 'on'}</span>
+                </button>
+                <button
+                  className="header-control"
+                  type="button"
+                  onClick={() => {
+                    void playSound('button-tap')
+                    setReducedMotion((value) => !value)
+                  }}
+                  aria-pressed={reducedMotion}
+                >
+                  {reducedMotion ? 'Gentle motion' : 'Reduce motion'}
+                </button>
+                {fullscreenSupported && (
+                  <button className="header-control" type="button" onClick={() => void toggleFullscreen()} aria-pressed={isFullscreen}>
+                    <span className="header-control__icon" aria-hidden="true">{isFullscreen ? '×' : '⛶'}</span>
+                    <span>{isFullscreen ? 'Exit full screen' : 'Full screen'}</span>
+                  </button>
+                )}
+              </div>
               <details className="garden-options">
                 <summary>Garden options</summary>
                 <button type="button" onClick={resetGarden}>Reset saved gardens</button>
@@ -478,12 +581,12 @@ function App() {
 
             <CameraPreview
               videoRef={videoRef}
-              status={handStatus}
+              status={cameraPreviewStatus}
               debug={handDebug}
               interaction={interactionDebug}
               cameraIcon={assets.ui.camera}
-              onEnable={() => void enableCamera()}
-              onRetry={() => void retryCamera()}
+              onEnable={() => void beginHandsAndVoice()}
+              onRetry={() => void beginHandsAndVoice()}
               onDisable={disableCamera}
             />
 
@@ -517,35 +620,34 @@ function App() {
                                 ? rainGestureArmed ? 'Keep your palm open and wave gently left and right.' : 'Relax your hand once, then wave.'
                                 : step === 'grow' && growthStarted
                                   ? 'The flower is opening through all six gentle stages.'
+                                  : step === 'grow'
+                                    ? 'Or say Grow, make a sound, or tap below.'
                                   : currentStepCopy.instruction}
                   </p>
 
-                  {!(step === 'grow' && (voiceStarted || growthStarted)) && (
+                  {!(step === 'grow' && growthStarted) && (
                     <div className={`gesture-demo gesture-demo--${step}`} aria-hidden="true"><AssetImage src={gestureAsset} alt="" /></div>
                   )}
 
-                  {step === 'grow' && !voiceStarted && !growthStarted && (
-                    <button className="voice-button" type="button" onClick={() => { void playSound('button-tap'); setVoiceStarted(true); void startVoice() }}>
-                      <span className="ui-icon-frame ui-icon-frame--trim" aria-hidden="true"><AssetImage src={assets.ui.microphone} alt="" /></span>
-                      Tap the microphone
-                    </button>
+                  {step === 'grow' && !growthStarted && (
+                    <p className={`grow-gesture-progress grow-gesture-progress--${growGesturePhase}`} role="status">
+                      {growGestureCopy}
+                    </p>
                   )}
 
-                  {step === 'grow' && voiceStarted && !growthStarted && (
-                    <div className="voice-status" role="status">
-                      <strong>{voiceFeedback}</strong>
-                      {voiceStatus === 'calibrating' && <span className="voice-status__secondary">Finding the quiet around you…</span>}
-                      {voiceStatus === 'denied' && <span className="voice-status__secondary">Microphone is off. Tap to grow still works.</span>}
-                      {voiceStatus === 'unavailable' && <span className="voice-status__secondary">Voice is not available here. Tap to grow still works.</span>}
-                      {!speechSupported && voiceStatus !== 'denied' && voiceStatus !== 'unavailable' && <span className="voice-status__secondary">A long sound still works here.</span>}
+                  {step === 'grow' && !growthStarted && voiceStarted && (
+                    <div className="voice-listening" role="status">
+                      <span>{voiceStatus === 'heard' ? voiceFeedback : 'Voice & sound listening'}</span>
                       {voiceTranscript && <span className="voice-status__transcript">Heard: “{voiceTranscript}”</span>}
                       <div className="voice-meter" role="progressbar" aria-label="Microphone level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(voiceLevel * 100)}>
                         <span style={{ transform: `scaleX(${Math.max(0.03, voiceLevel)})` }} />
                         <i style={{ transform: `scaleX(${soundProgress})` }} />
                       </div>
-                      {(voiceStatus === 'calibrating' || voiceStatus === 'listening') && <button className="recalibrate-button" type="button" onClick={recalibrateVoice}>Recalibrate</button>}
-                      {(voiceStatus === 'denied' || voiceStatus === 'unavailable') && <button className="recalibrate-button" type="button" onClick={() => void startVoice()}>Try microphone again</button>}
                     </div>
+                  )}
+
+                  {step === 'grow' && !growthStarted && media.microphone !== 'ready' && (
+                    <p className="voice-unavailable">Voice is off. Hands and Tap to Grow still work.</p>
                   )}
 
                   {step === 'plant' ? (
@@ -582,8 +684,8 @@ function App() {
               {step === 'place' && selected && (
                 <>
                   <p className="eyebrow">Into the garden</p>
-                  <h2>Pinch the flower and plant it in your garden.</h2>
-                  <p className="instruction-copy">Hold the pinch while moving, then release over an empty soil spot.</p>
+                  <h2>Pinch the flower and place it in the garden.</h2>
+                  <p className="instruction-copy">Release near an empty soil spot. The flower will gently snap in.</p>
                   <p className={`touch-drag-hint ${fallbackReady ? 'touch-drag-hint--ready' : ''}`}>Use touch: Drag the flower into the garden.</p>
                   {plantMessage && <p className="gentle-status" role="status">{plantMessage}</p>}
                 </>

@@ -155,7 +155,7 @@ export function CameraPreview({
         {!active && (
           <div className="camera-preview__start">
             {status === 'not-started' && (
-              <button type="button" onClick={onEnable}>Enable Camera</button>
+              <button type="button" onClick={onEnable}>Enable Hands &amp; Voice</button>
             )}
             {retryable && (
               <button type="button" onClick={onRetry}>Retry</button>

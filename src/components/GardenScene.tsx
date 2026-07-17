@@ -13,14 +13,19 @@ import type { FlowerChoice, FlowerId } from '../data/flowers'
 import { FLOWERS } from '../data/flowers'
 import type { GameStep } from '../game/gameState'
 import type { GardenData } from '../game/gardenStorage'
-import { GARDEN_SLOTS, slotWithOccupancy, type GardenSlot } from '../game/gardenSlots'
+import {
+  findGardenSlotIncludingOccupied,
+  findMagneticGardenSlot,
+  GARDEN_SLOTS,
+  slotWithOccupancy,
+  type GardenSlot,
+} from '../game/gardenSlots'
 import { isInsidePotDropZone, resolveSeedDrop } from '../gesture/seedInteractionMath'
 import type { CursorPoint, PinchEvent, PinchState } from '../hooks/useHandTracking'
 import type { SeedInteractionDebug, SeedInteractionPhase } from '../types/interaction'
 import { AssetImage } from './AssetImage'
 import { FlowerGrowthSequence } from './FlowerGrowthSequence'
 import { LocalRain } from './LocalRain'
-import { SunRays } from './SunRays'
 
 export type WeatherState = 'clear' | 'cloudEntering' | 'cloudy' | 'raining' | 'clearing'
 type DragSource = 'hand' | 'pointer' | null
@@ -128,10 +133,20 @@ export function GardenScene({
   const [selectionPending, setSelectionPending] = useState<FlowerId | null>(null)
   const [gridRevealed, setGridRevealed] = useState(false)
   const [keyboardPlantHeld, setKeyboardPlantHeld] = useState(false)
+  const [candidateSlotIndex, setCandidateSlotIndex] = useState<number | null>(null)
 
   const activePage = garden.pages[garden.activePageIndex]
   const occupiedSlots = useMemo(() => new Set(activePage.flowers.map((flower) => flower.slotIndex)), [activePage.flowers])
   const slots = useMemo(() => slotWithOccupancy(occupiedSlots), [occupiedSlots])
+  const suggestedSlotIndex = useMemo(() => {
+    const emptySlots = slots.filter((slot) => !slot.occupied)
+    return emptySlots.reduce<GardenSlot | null>((nearest, slot) => {
+      if (!nearest) return slot
+      const slotDistance = (slot.xPercent - 50) ** 2 + ((slot.yPercent - 92) * 0.85) ** 2
+      const nearestDistance = (nearest.xPercent - 50) ** 2 + ((nearest.yPercent - 92) * 0.85) ** 2
+      return slotDistance < nearestDistance ? slot : nearest
+    }, null)?.slotIndex ?? null
+  }, [slots])
   const showGardenGrid = step === 'place' && gridRevealed
   const showCalibration = import.meta.env.DEV && new URLSearchParams(window.location.search).has('calibrateGarden')
   const showSun = step === 'sun'
@@ -142,7 +157,7 @@ export function GardenScene({
     const flowerFrames = selected ? assets.flowers[selected.id] : []
     if (step === 'choose') return FLOWERS.flatMap((flower) => [assets.seeds[flower.id].packet, assets.seeds[flower.id].seed])
     if (step === 'plant') return [assets.pots.empty, assets.pots.planted, assets.weather.sun]
-    if (step === 'sun') return [assets.weather.sun, assets.weather.cloudNormal]
+    if (step === 'sun') return [assets.weather.sun, assets.weather.sunRays, assets.weather.cloudNormal].filter((source): source is string => Boolean(source))
     if (step === 'rain') return [assets.weather.cloudNormal, assets.weather.cloudRain, ...Object.values(assets.weather.droplets), assets.pots.watered, ...flowerFrames.slice(0, 2)]
     if (step === 'grow') return [assets.pots.watered, ...flowerFrames, assets.garden.plantingGrid]
     if (step === 'place') return [assets.garden.plantingGrid, flowerFrames[5]].filter((source): source is string => Boolean(source))
@@ -213,21 +228,22 @@ export function GardenScene({
   const slotAtPoint = useCallback((clientX: number, clientY: number): GardenSlot | null => {
     const bounds = gridRef.current?.getBoundingClientRect()
     if (!bounds || bounds.width === 0 || bounds.height === 0) return null
-    let closest: GardenSlot | null = null
-    let closestDistance = Number.POSITIVE_INFINITY
-    for (const slot of GARDEN_SLOTS) {
-      const centreX = bounds.left + bounds.width * slot.xPercent / 100
-      const centreY = bounds.top + bounds.height * slot.yPercent / 100
-      const normalX = (clientX - centreX) / (bounds.width * 0.072)
-      const normalY = (clientY - centreY) / (bounds.height * 0.055)
-      const distance = normalX * normalX + normalY * normalY
-      if (distance <= 1 && distance < closestDistance) {
-        closest = slot
-        closestDistance = distance
-      }
-    }
-    return closest
-  }, [])
+    return findMagneticGardenSlot(
+      (clientX - bounds.left) / bounds.width * 100,
+      (clientY - bounds.top) / bounds.height * 100,
+      occupiedSlots,
+    )
+  }, [occupiedSlots])
+
+  const occupiedSlotAtPoint = useCallback((clientX: number, clientY: number): GardenSlot | null => {
+    const bounds = gridRef.current?.getBoundingClientRect()
+    if (!bounds || bounds.width === 0 || bounds.height === 0) return null
+    const slot = findGardenSlotIncludingOccupied(
+      (clientX - bounds.left) / bounds.width * 100,
+      (clientY - bounds.top) / bounds.height * 100,
+    )
+    return slot && occupiedSlots.has(slot.slotIndex) ? slot : null
+  }, [occupiedSlots])
 
   const beginDrag = useCallback((kind: Exclude<DragKind, null>, flower: FlowerChoice, source: Exclude<DragSource, null>, clientX: number, clientY: number, pointerId: number | null) => {
     if (performance.now() < cooldownUntilRef.current || dragRef.current.flower) return
@@ -256,6 +272,7 @@ export function GardenScene({
     } else {
       setGridRevealed(true)
       setKeyboardPlantHeld(false)
+      setCandidateSlotIndex(null)
     }
     transitionFrameRef.current = requestAnimationFrame(() => {
       if (dragRef.current.flower?.id === flower.id && dragRef.current.kind === kind) {
@@ -269,15 +286,20 @@ export function GardenScene({
     if (!current.flower) return
     const point = localPoint(clientX, clientY)
     updateDrag({ ...current, phase: 'dragging', x: point.x, y: point.y })
-    setDropZoneOverlap(current.kind === 'seed'
-      ? overlapsPot(clientX, clientY)
-      : Boolean(slotAtPoint(clientX, clientY)))
+    if (current.kind === 'seed') {
+      setDropZoneOverlap(overlapsPot(clientX, clientY))
+    } else {
+      const candidate = slotAtPoint(clientX, clientY)
+      setCandidateSlotIndex(candidate?.slotIndex ?? null)
+      setDropZoneOverlap(Boolean(candidate))
+    }
   }, [localPoint, overlapsPot, slotAtPoint, updateDrag])
 
   const returnDraggedItem = useCallback((reason?: 'outside' | 'occupied') => {
     const latest = dragRef.current
     updateDrag({ ...latest, phase: 'returned', x: latest.originX, y: latest.originY })
     setDropZoneOverlap(false)
+    setCandidateSlotIndex(null)
     if (reason) onPlantRejected?.(reason)
     returnTimerRef.current = window.setTimeout(() => {
       updateDrag(idleDrag())
@@ -307,11 +329,8 @@ export function GardenScene({
 
     const slot = lost ? null : slotAtPoint(clientX, clientY)
     if (!slot) {
-      requestAnimationFrame(() => returnDraggedItem('outside'))
-      return
-    }
-    if (occupiedSlots.has(slot.slotIndex)) {
-      requestAnimationFrame(() => returnDraggedItem('occupied'))
+      const reason = !lost && occupiedSlotAtPoint(clientX, clientY) ? 'occupied' : 'outside'
+      requestAnimationFrame(() => returnDraggedItem(reason))
       return
     }
     const accepted = onPlantFlower?.(slot.slotIndex) ?? false
@@ -321,11 +340,12 @@ export function GardenScene({
     }
     updateDrag({ ...current, phase: 'planted', x: point.x, y: point.y })
     setDropZoneOverlap(false)
+    setCandidateSlotIndex(null)
     returnTimerRef.current = window.setTimeout(() => {
       updateDrag(idleDrag())
       updateHovered(null)
     }, reducedMotion ? 20 : 220)
-  }, [localPoint, occupiedSlots, onPlantFlower, onPlantSeed, onSeedDrop, overlapsPot, reducedMotion, returnDraggedItem, slotAtPoint, updateDrag, updateHovered])
+  }, [localPoint, occupiedSlotAtPoint, onPlantFlower, onPlantSeed, onSeedDrop, overlapsPot, reducedMotion, returnDraggedItem, slotAtPoint, updateDrag, updateHovered])
 
   const chooseFlower = useCallback((flower: FlowerChoice) => {
     if (selectionPending || step !== 'choose') return
@@ -343,6 +363,7 @@ export function GardenScene({
       if (dragRef.current.flower) updateDrag(idleDrag())
       if (hoveredRef.current) updateHovered(null)
       setDropZoneOverlap(false)
+      setCandidateSlotIndex(null)
       return
     }
     if (!handCursor.visible) {
@@ -458,10 +479,11 @@ export function GardenScene({
     >
       <AssetImage className="garden-scene__background" src={assets.background} alt="" width="1696" height="965" />
 
-      {sunny && <div className="garden-sun-warmth" aria-hidden="true" />}
       {showSun && (
         <button className={`garden-weather-action garden-weather-action--sun ${sunny ? 'is-active' : ''} ${sunExiting ? 'is-exiting' : ''}`} type="button" onClick={onSunTap} aria-label="Tap the sun to warm the planted seed">
-          <SunRays />
+          {assets.weather.sunRays && (
+            <AssetImage className="garden-weather garden-weather--sun-rays" src={assets.weather.sunRays} alt="" aria-hidden="true" />
+          )}
           <AssetImage className="garden-weather garden-weather--sun" src={assets.weather.sun} alt="" width="1188" height="1164" />
         </button>
       )}
@@ -535,7 +557,7 @@ export function GardenScene({
           ) : (
             <button
               key={slot.slotIndex}
-              className="garden-slot garden-slot--empty"
+              className={`garden-slot garden-slot--empty ${candidateSlotIndex === slot.slotIndex ? 'is-candidate' : ''} ${candidateSlotIndex === null && suggestedSlotIndex === slot.slotIndex ? 'is-nearest' : ''}`}
               style={{ left: `${slot.xPercent}%`, top: `${slot.yPercent}%` }}
               type="button"
               aria-label={`Plant in empty garden slot ${slot.slotIndex + 1}`}
@@ -643,7 +665,8 @@ export function GardenScene({
           {(raining || weatherState === 'clearing') && (
             <span className="pot-soil-wet" aria-hidden="true"><i /><i /><i /></span>
           )}
-          <AssetImage className="pot" ref={potRef} src={pot} alt={watered ? 'Watered flower pot' : planted ? 'Planted flower pot' : 'Empty flower pot'} />
+          <AssetImage className="pot pot--base" ref={potRef} src={pot} alt={watered ? 'Watered flower pot' : planted ? 'Planted flower pot' : 'Empty flower pot'} />
+          <AssetImage className="pot pot--front-rim" src={pot} alt="" aria-hidden="true" />
         </div>
       )}
 
