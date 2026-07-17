@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { FlowerId } from './flowers'
 
+export function runtimeAssetPath(source: string): string {
+  return source.replace(/\.(?:png|jpe?g)(?=(?:[?#]|$))/i, '.webp')
+}
+
 export interface AssetMap {
   background: string
   foreground: string

@@ -8,7 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type TouchEvent as ReactTouchEvent,
 } from 'react'
-import type { AssetMap } from '../data/assets'
+import { runtimeAssetPath, type AssetMap } from '../data/assets'
 import { FLOWER_GROWTH_LAYOUT, GARDEN_FLOWER_TYPE_SCALE } from '../data/flowerLayout'
 import type { FlowerChoice, FlowerId } from '../data/flowers'
 import { FLOWERS } from '../data/flowers'
@@ -170,8 +170,14 @@ export function GardenScene({
   useEffect(() => {
     preloadSources.forEach((src) => {
       const image = new Image()
-      image.onerror = () => console.error(`[Bloom asset] Failed to preload image: ${src}`)
-      image.src = src
+      image.onerror = () => {
+        if (image.src.endsWith('.webp')) {
+          image.src = src
+          return
+        }
+        console.error(`[Bloom asset] Failed to preload image: ${src}`)
+      }
+      image.src = runtimeAssetPath(src)
     })
   }, [preloadSources])
 
