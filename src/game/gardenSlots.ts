@@ -8,7 +8,7 @@ export interface GardenSlot {
   occupied: boolean
 }
 
-const ROW_SCALE = [0.78, 0.9, 1] as const
+const ROW_SCALE = [0.72, 0.86, 1] as const
 
 // Calibrated against the illustrated soil centres in planting-grid.png.
 // The slight per-row offsets preserve the artwork's hand-painted perspective.
