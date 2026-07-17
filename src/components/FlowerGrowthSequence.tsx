@@ -71,7 +71,7 @@ export function FlowerGrowthSequence({ flower, frames, active, onComplete }: Flo
 
   return (
     <figure
-      className={`flower-growth flower-growth--${flower.id} ${ready ? 'is-ready' : ''} ${stage === sixFrames.length - 1 ? 'is-blooming' : ''}`}
+      className={`flower-growth flower-growth--${flower.id} flower-growth--stage-${stage} ${ready ? 'is-ready' : ''} ${stage === sixFrames.length - 1 ? 'is-blooming' : ''}`}
       aria-label={`${flower.name} growth, stage ${stage + 1} of ${sixFrames.length}`}
     >
       <div className="flower-growth__soil" aria-hidden="true" />
