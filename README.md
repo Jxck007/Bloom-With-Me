@@ -161,3 +161,4 @@ When browser-provided speech recognition is used, audio handling may involve the
 - [ ] Reset a completed garden and confirm saved completion data is removed.
 - [ ] Check 360×800, 390×844, 768×1024, 1024×768, 1366×768, and 1920×1080 layouts.
 - [ ] Verify the deployed HTTPS URL can request camera and microphone permissions.
+# Blooms-With-Me
