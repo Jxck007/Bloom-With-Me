@@ -341,9 +341,9 @@ function App() {
   const beginHandsAndVoice = async () => {
     if (media.status === 'requesting') return
     void playSound('button-tap')
+    setStep('choose')
     const result = await media.request()
     if (result.camera === 'ready' && result.stream) void enableCameraWithStream(result.stream)
-    setStep('choose')
   }
 
   const fullscreenSupported = typeof document.documentElement.requestFullscreen === 'function'
