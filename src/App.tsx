@@ -47,6 +47,13 @@ const RAIN_DURATION_MS = 4_800
 const CLOUD_ENTER_MS = 850
 const CLOUD_CLEAR_MS = 1_450
 
+interface ScheduledTransition {
+  timer: number | null
+  callback: () => void
+  remaining: number
+  startedAt: number
+}
+
 const STEP_COPY: Record<Exclude<GameStep, 'welcome' | 'choose' | 'place'>, {
   eyebrow: string
   title: string
@@ -87,9 +94,10 @@ function App() {
   const [voiceStarted, setVoiceStarted] = useState(false)
   const [growGesturePhase, setGrowGesturePhase] = useState<GrowGesturePhase>('waitingForHand')
   const [isFullscreen, setIsFullscreen] = useState(Boolean(document.fullscreenElement))
-  const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
+  const [viewingGarden, setViewingGarden] = useState(false)
   const [sunCelebrating, setSunCelebrating] = useState(false)
   const [sunExiting, setSunExiting] = useState(false)
+  const [sunTouchAnimating, setSunTouchAnimating] = useState(false)
   const [sunHoldMs, setSunHoldMs] = useState(0)
   const [weatherState, setWeatherState] = useState<WeatherState>('clear')
   const [rainGestureArmed, setRainGestureArmed] = useState(false)
@@ -106,9 +114,10 @@ function App() {
   const lastTouchFallbackRef = useRef(0)
   const touchFallbackPendingRef = useRef(false)
   const touchFallbackTimerRef = useRef<number | null>(null)
-  const transitionTimersRef = useRef(new Set<number>())
+  const transitionTimersRef = useRef(new Set<ScheduledTransition>())
   const plantingTimerRef = useRef<number | null>(null)
   const sunHoldTrackerRef = useRef(initialSunHoldTracker())
+  const sunTouchFrameRef = useRef<number | null>(null)
   const sunGestureCooldownUntilRef = useRef(0)
   const rainMotionRef = useRef({ x: null as number | null, direction: 0, changes: 0 })
   const stepRef = useRef<GameStep>(step)
@@ -119,6 +128,7 @@ function App() {
   const weatherBusyRef = useRef(false)
   const placingRef = useRef(false)
   const growGestureRef = useRef(initialGrowGestureTracker())
+  const viewingGardenRef = useRef(false)
   const { muted, play: playSound, toggleMuted } = useAudioManager()
   const media = useMediaPermissions()
 
@@ -139,13 +149,25 @@ function App() {
     disableCamera,
   } = useHandTracking()
 
-  const scheduleTransition = useCallback((callback: () => void, delay: number) => {
-    const timer = window.setTimeout(() => {
-      transitionTimersRef.current.delete(timer)
-      callback()
-    }, delay)
-    transitionTimersRef.current.add(timer)
+  const armTransition = useCallback((transition: ScheduledTransition) => {
+    transition.startedAt = performance.now()
+    transition.timer = window.setTimeout(() => {
+      transitionTimersRef.current.delete(transition)
+      transition.timer = null
+      transition.callback()
+    }, transition.remaining)
   }, [])
+
+  const scheduleTransition = useCallback((callback: () => void, delay: number) => {
+    const transition: ScheduledTransition = {
+      timer: null,
+      callback,
+      remaining: delay,
+      startedAt: performance.now(),
+    }
+    transitionTimersRef.current.add(transition)
+    if (!viewingGardenRef.current) armTransition(transition)
+  }, [armTransition])
 
   const commitGarden = useCallback((next: GardenData) => {
     gardenRef.current = next
@@ -171,7 +193,7 @@ function App() {
   } = useVoiceTrigger(startGrowth)
 
   useEffect(() => {
-    if (step !== 'grow' || growthStarted) return
+    if (viewingGarden || step !== 'grow' || growthStarted) return
     const observation: GrowPoseObservation = !handDebug.handVisible
       ? 'none'
       : handDebug.currentGesture === 'fist'
@@ -183,7 +205,7 @@ function App() {
     growGestureRef.current = next.tracker
     setGrowGesturePhase((current) => current === next.tracker.phase ? current : next.tracker.phase)
     if (next.confirmed) startGrowth()
-  }, [growthStarted, handDebug.currentGesture, handDebug.handVisible, handDebug.landmarks, startGrowth, step])
+  }, [growthStarted, handDebug.currentGesture, handDebug.handVisible, handDebug.landmarks, startGrowth, step, viewingGarden])
 
   const finishSunStage = useCallback(() => {
     if (stepRef.current !== 'sun' || weatherBusyRef.current) return
@@ -225,13 +247,35 @@ function App() {
     }, RAIN_DURATION_MS)
   }, [playSound, scheduleTransition])
 
+  const expandSunFromTouch = useCallback(() => {
+    if (stepRef.current !== 'sun' || weatherBusyRef.current || sunTouchFrameRef.current !== null) return
+    setSunTouchAnimating(true)
+    let progress = Math.min(1, sunHoldTrackerRef.current.progressMs / ACTIVE_SUN_HOLD_DURATION_MS)
+    let previousTime = performance.now()
+    const tick = (now: number) => {
+      if (!viewingGardenRef.current) {
+        progress = Math.min(1, progress + (now - previousTime) / 1_000)
+        setSunHoldMs(progress * ACTIVE_SUN_HOLD_DURATION_MS)
+      }
+      previousTime = now
+      if (progress >= 1) {
+        sunTouchFrameRef.current = null
+        setSunTouchAnimating(false)
+        finishSunStage()
+        return
+      }
+      sunTouchFrameRef.current = requestAnimationFrame(tick)
+    }
+    sunTouchFrameRef.current = requestAnimationFrame(tick)
+  }, [finishSunStage])
+
   useEffect(() => {
     if (step !== 'sun') {
       sunHoldTrackerRef.current = initialSunHoldTracker()
       setSunHoldMs(0)
       return
     }
-    if (sunCelebrating) return
+    if (sunCelebrating || sunTouchAnimating || viewingGarden) return
 
     const now = performance.now()
     const validOpenPalm = handDebug.handVisible && handDebug.currentGesture === 'open-palm'
@@ -244,10 +288,10 @@ function App() {
     sunHoldTrackerRef.current = next
     setSunHoldMs(next.progressMs)
     if (next.completed) finishSunStage()
-  }, [finishSunStage, handDebug.currentGesture, handDebug.handVisible, handDebug.landmarks, step, sunCelebrating])
+  }, [finishSunStage, handDebug.currentGesture, handDebug.handVisible, handDebug.landmarks, step, sunCelebrating, sunTouchAnimating, viewingGarden])
 
   useEffect(() => {
-    if (step !== 'rain' || weatherState !== 'cloudy' || rainGestureArmed) return
+    if (viewingGarden || step !== 'rain' || weatherState !== 'cloudy' || rainGestureArmed) return
     if (performance.now() < sunGestureCooldownUntilRef.current) return
     const neutralGesture = !handDebug.handVisible
       || (handDebug.currentGesture !== 'open-palm' && handDebug.currentGesture !== 'wave' && handDebug.currentGesture !== 'pinch')
@@ -255,14 +299,14 @@ function App() {
       setRainGestureArmed(true)
       setRainGuide('Open your hand')
     }
-  }, [handDebug.currentGesture, handDebug.handVisible, rainGestureArmed, step, weatherState])
+  }, [handDebug.currentGesture, handDebug.handVisible, rainGestureArmed, step, viewingGarden, weatherState])
 
   useEffect(() => {
-    if (step === 'rain' && weatherState === 'cloudy' && rainGestureArmed && gestureEvent?.name === 'wave') finishRainStage()
-  }, [finishRainStage, gestureEvent, rainGestureArmed, step, weatherState])
+    if (!viewingGarden && step === 'rain' && weatherState === 'cloudy' && rainGestureArmed && gestureEvent?.name === 'wave') finishRainStage()
+  }, [finishRainStage, gestureEvent, rainGestureArmed, step, viewingGarden, weatherState])
 
   useEffect(() => {
-    if (step !== 'rain' || weatherState !== 'cloudy' || !rainGestureArmed || !handDebug.handVisible || (handDebug.currentGesture !== 'open-palm' && handDebug.currentGesture !== 'wave')) {
+    if (viewingGarden || step !== 'rain' || weatherState !== 'cloudy' || !rainGestureArmed || !handDebug.handVisible || (handDebug.currentGesture !== 'open-palm' && handDebug.currentGesture !== 'wave')) {
       rainMotionRef.current = { x: null, direction: 0, changes: 0 }
       return
     }
@@ -281,10 +325,12 @@ function App() {
     motion.direction = direction
     motion.x = x
     setRainGuide(motion.changes >= 2 ? 'One more time' : direction < 0 ? 'Move right' : 'Move left')
-  }, [handDebug.currentGesture, handDebug.cursorX, handDebug.handVisible, rainGestureArmed, step, weatherState])
+  }, [handDebug.currentGesture, handDebug.cursorX, handDebug.handVisible, rainGestureArmed, step, viewingGarden, weatherState])
 
   useEffect(() => {
-    if (step !== 'grow') {
+    if (viewingGarden) {
+      stopVoice()
+    } else if (step !== 'grow') {
       setVoiceStarted(false)
       setGrowthStarted(false)
       growthStartedRef.current = false
@@ -297,11 +343,21 @@ function App() {
       setVoiceStarted(true)
       void startVoice(media.stream)
     }
-  }, [growthStarted, media.microphone, media.stream, startVoice, step, stopVoice, voiceStarted])
+  }, [growthStarted, media.microphone, media.stream, startVoice, step, stopVoice, viewingGarden, voiceStarted])
 
   useEffect(() => {
-    document.documentElement.dataset.reducedMotion = String(reducedMotion)
-  }, [reducedMotion])
+    viewingGardenRef.current = viewingGarden
+    const now = performance.now()
+    transitionTimersRef.current.forEach((transition) => {
+      if (viewingGarden && transition.timer !== null) {
+        window.clearTimeout(transition.timer)
+        transition.timer = null
+        transition.remaining = Math.max(0, transition.remaining - (now - transition.startedAt))
+      } else if (!viewingGarden && transition.timer === null) {
+        armTransition(transition)
+      }
+    })
+  }, [armTransition, viewingGarden])
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -316,7 +372,10 @@ function App() {
   useEffect(() => () => {
     if (touchFallbackTimerRef.current !== null) window.clearTimeout(touchFallbackTimerRef.current)
     if (plantingTimerRef.current !== null) window.clearTimeout(plantingTimerRef.current)
-    transitionTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+    if (sunTouchFrameRef.current !== null) cancelAnimationFrame(sunTouchFrameRef.current)
+    transitionTimersRef.current.forEach((transition) => {
+      if (transition.timer !== null) window.clearTimeout(transition.timer)
+    })
     transitionTimersRef.current.clear()
   }, [])
 
@@ -406,9 +465,9 @@ function App() {
       placingRef.current = false
       setSelected(null)
       setStep('choose')
-    }, reducedMotion ? 120 : 650)
+    }, 650)
     return true
-  }, [commitGarden, playSound, reducedMotion])
+  }, [commitGarden, playSound])
 
   const changeGardenPage = useCallback((pageIndex: number) => {
     const next = setActiveGardenPage(gardenRef.current, pageIndex)
@@ -430,12 +489,26 @@ function App() {
     setStep('choose')
   }
 
+  const openGardenView = () => {
+    if (interactionDebug.phase !== 'idle') return
+    void playSound('button-tap')
+    viewingGardenRef.current = true
+    setViewingGarden(true)
+  }
+
+  const closeGardenView = () => {
+    void playSound('button-tap')
+    viewingGardenRef.current = false
+    setViewingGarden(false)
+    requestAnimationFrame(() => window.dispatchEvent(new Event('resize')))
+  }
+
   const useTouchFallback = () => {
     if (step === 'grow') {
       stopVoice()
       startGrowth()
     } else if (step === 'sun') {
-      finishSunStage()
+      expandSunFromTouch()
     } else if (step === 'rain') {
       finishRainStage()
     } else {
@@ -458,6 +531,8 @@ function App() {
 
   const sunProgress = Math.min(1, sunHoldMs / ACTIVE_SUN_HOLD_DURATION_MS)
   const sunProgressPercent = Math.round(sunProgress * 100)
+  const gardenViewAvailable = ['choose', 'plant', 'sun', 'rain', 'grow'].includes(step)
+    && interactionDebug.phase === 'idle'
   const stageTitle = step === 'sun'
     ? sunCelebrating
       ? 'Sunlight ready'
@@ -493,20 +568,6 @@ function App() {
   return (
     <main className="app-shell">
       {step === 'welcome' && (
-        <button
-          className="motion-toggle"
-          type="button"
-          onClick={() => {
-            void playSound('button-tap')
-            setReducedMotion((value) => !value)
-          }}
-          aria-pressed={reducedMotion}
-        >
-          {reducedMotion ? 'Gentle motion on' : 'Reduce motion'}
-        </button>
-      )}
-
-      {step === 'welcome' && (
         <section className="welcome-screen">
           <GardenScene
             assets={assets}
@@ -518,7 +579,6 @@ function App() {
             watered={false}
             growthStarted={false}
             weatherState="clear"
-            reducedMotion={reducedMotion}
           />
           <div className="welcome-card">
             <p className="eyebrow">A calm garden game</p>
@@ -551,17 +611,15 @@ function App() {
                   <span className="ui-icon-frame ui-icon-frame--trim" aria-hidden="true"><AssetImage src={assets.ui.sound} alt="" /></span>
                   <span className="sound-status__label">Sound {muted ? 'off' : 'on'}</span>
                 </button>
-                <button
-                  className="header-control"
-                  type="button"
-                  onClick={() => {
-                    void playSound('button-tap')
-                    setReducedMotion((value) => !value)
-                  }}
-                  aria-pressed={reducedMotion}
-                >
-                  {reducedMotion ? 'Gentle motion' : 'Reduce motion'}
-                </button>
+                {viewingGarden ? (
+                  <button className="header-control header-control--garden" type="button" onClick={closeGardenView}>
+                    Back to Growing
+                  </button>
+                ) : gardenViewAvailable ? (
+                  <button className="header-control header-control--garden" type="button" onClick={openGardenView}>
+                    View Garden
+                  </button>
+                ) : null}
                 {fullscreenSupported && (
                   <button className="header-control" type="button" onClick={() => void toggleFullscreen()} aria-pressed={isFullscreen}>
                     <span className="header-control__icon" aria-hidden="true">{isFullscreen ? '×' : '⛶'}</span>
@@ -590,7 +648,7 @@ function App() {
               onSeedPickup={() => void playSound('seed-pickup')}
               onSeedDrop={() => void playSound('seed-drop')}
               onInteractionDebug={setInteractionDebug}
-              onSunTap={finishSunStage}
+              onSunTap={expandSunFromTouch}
               onCloudTap={finishRainStage}
               handCursor={cursor}
               pinchEvent={pinchEvent}
@@ -601,7 +659,9 @@ function App() {
               watered={watered}
               growthStarted={growthStarted}
               weatherState={weatherState}
-              reducedMotion={reducedMotion}
+              sunProgress={sunProgress}
+              gardenView={viewingGarden}
+              paused={viewingGarden}
               onGrowthComplete={finishGrowth}
             />
 
@@ -617,7 +677,20 @@ function App() {
             />
 
             <div className={`instruction-panel ${step === 'place' ? 'instruction-panel--placement' : ''}`} aria-live="polite">
-              {step === 'choose' && (
+              {viewingGarden && (
+                <>
+                  <p className="eyebrow">Your flowers</p>
+                  <h2>Garden {garden.activePageIndex + 1}</h2>
+                  <p className="instruction-copy">
+                    {flowerCount > 0
+                      ? 'Look through every garden you have planted.'
+                      : 'Your garden is waiting for its first flower.'}
+                  </p>
+                  <button className="fallback-button garden-back-button" type="button" onClick={closeGardenView}>Back to Growing</button>
+                </>
+              )}
+
+              {!viewingGarden && step === 'choose' && (
                 <>
                   <p className="eyebrow">Choose a seed</p>
                   <h2>Which flower will you grow?</h2>
@@ -627,7 +700,7 @@ function App() {
                 </>
               )}
 
-              {currentStepCopy && (
+              {!viewingGarden && currentStepCopy && (
                 <>
                   <p className="eyebrow">{currentStepCopy.eyebrow}</p>
                   <h2>{stageTitle}</h2>
@@ -721,7 +794,7 @@ function App() {
                 </>
               )}
 
-              {step === 'place' && selected && (
+              {!viewingGarden && step === 'place' && selected && (
                 <>
                   <p className="eyebrow">Into the garden</p>
                   <h2>Plant your flower</h2>

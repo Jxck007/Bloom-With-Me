@@ -17,10 +17,11 @@ interface FlowerGrowthSequenceProps {
   flower: FlowerChoice
   frames: string[]
   active: boolean
+  paused?: boolean
   onComplete: () => void
 }
 
-export function FlowerGrowthSequence({ flower, frames, active, onComplete }: FlowerGrowthSequenceProps) {
+export function FlowerGrowthSequence({ flower, frames, active, paused = false, onComplete }: FlowerGrowthSequenceProps) {
   const [ready, setReady] = useState(false)
   const [stage, setStage] = useState(0)
   const completedRef = useRef(false)
@@ -50,31 +51,26 @@ export function FlowerGrowthSequence({ flower, frames, active, onComplete }: Flo
   }, [flower.id, sixFrames])
 
   useEffect(() => {
-    if (!active || !ready) return
+    if (!active || !ready || paused || completedRef.current) return
 
-    const timers: number[] = []
-    let elapsed = 0
-    STAGE_DURATIONS_MS.forEach((duration, index) => {
-      elapsed += duration
-      if (index < sixFrames.length - 1) {
-        timers.push(window.setTimeout(() => setStage(index + 1), elapsed))
+    const timer = window.setTimeout(() => {
+      if (stage < sixFrames.length - 1) {
+        setStage((current) => current + 1)
+        return
       }
-    })
-    timers.push(window.setTimeout(() => {
       if (completedRef.current) return
       completedRef.current = true
       onCompleteRef.current()
-    }, FLOWER_GROWTH_TOTAL_MS))
+    }, STAGE_DURATIONS_MS[stage] ?? 0)
 
-    return () => timers.forEach((timer) => window.clearTimeout(timer))
-  }, [active, ready, sixFrames.length])
+    return () => window.clearTimeout(timer)
+  }, [active, paused, ready, sixFrames.length, stage])
 
   return (
     <figure
       className={`flower-growth flower-growth--${flower.id} flower-growth--stage-${stage} ${ready ? 'is-ready' : ''} ${stage === sixFrames.length - 1 ? 'is-blooming' : ''}`}
       aria-label={`${flower.name} growth, stage ${stage + 1} of ${sixFrames.length}`}
     >
-      <div className="flower-growth__soil" aria-hidden="true" />
       {sixFrames.map((src, index) => (
         <AssetImage
           key={src}

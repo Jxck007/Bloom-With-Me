@@ -68,7 +68,9 @@ interface GardenSceneProps {
   watered: boolean
   growthStarted: boolean
   weatherState: WeatherState
-  reducedMotion: boolean
+  sunProgress?: number
+  gardenView?: boolean
+  paused?: boolean
   onGrowthComplete?: () => void
 }
 
@@ -108,7 +110,9 @@ export function GardenScene({
   watered,
   growthStarted,
   weatherState,
-  reducedMotion,
+  sunProgress = 0,
+  gardenView = false,
+  paused = false,
   onGrowthComplete,
 }: GardenSceneProps) {
   const sceneRef = useRef<HTMLDivElement>(null)
@@ -124,6 +128,7 @@ export function GardenScene({
   const lastPinchEventRef = useRef(0)
   const cooldownUntilRef = useRef(0)
   const returnTimerRef = useRef<number | null>(null)
+  const plantSeedTimerRef = useRef<number | null>(null)
   const selectionTimerRef = useRef<number | null>(null)
   const transitionFrameRef = useRef<number | null>(null)
   const swipeStartRef = useRef<number | null>(null)
@@ -149,15 +154,16 @@ export function GardenScene({
       return slotDistance < nearestDistance ? slot : nearest
     }, null)?.slotIndex ?? null
   }, [slots])
-  const showGardenGrid = step === 'place' && gridRevealed
+  const showGardenGrid = gardenView || (step === 'place' && gridRevealed)
   const showCalibration = import.meta.env.DEV && new URLSearchParams(window.location.search).has('calibrateGarden')
-  const showSun = step === 'sun'
-  const showClouds = step === 'rain'
+  const showSun = step === 'sun' && !gardenView
+  const showClouds = step === 'rain' && !gardenView
   const raining = weatherState === 'raining'
   const pot = watered ? assets.pots.watered : planted ? assets.pots.planted : assets.pots.empty
   const growthLayout = selected ? FLOWER_GROWTH_LAYOUT[selected.id] : null
   const preloadSources = useMemo(() => {
     const flowerFrames = selected ? assets.flowers[selected.id] : []
+    if (gardenView) return [assets.garden.plantingGrid, ...activePage.flowers.map((flower) => assets.flowers[flower.flowerType][5])]
     if (step === 'choose') return FLOWERS.flatMap((flower) => [assets.seeds[flower.id].packet, assets.seeds[flower.id].seed])
     if (step === 'plant') return [assets.pots.empty, assets.pots.planted, assets.weather.sun]
     if (step === 'sun') return [assets.weather.sun, assets.weather.sunRays, assets.weather.cloudNormal].filter((source): source is string => Boolean(source))
@@ -165,7 +171,7 @@ export function GardenScene({
     if (step === 'grow') return [assets.pots.watered, ...flowerFrames, assets.garden.plantingGrid]
     if (step === 'place') return [assets.garden.plantingGrid, flowerFrames[5]].filter((source): source is string => Boolean(source))
     return [assets.background, assets.foreground]
-  }, [assets, selected, step])
+  }, [activePage.flowers, assets, gardenView, selected, step])
 
   useEffect(() => {
     preloadSources.forEach((src) => {
@@ -382,8 +388,21 @@ export function GardenScene({
         return
       }
       cooldownUntilRef.current = performance.now() + 700
-      updateDrag({ ...current, phase: 'planted', x: point.x, y: point.y })
-      onPlantSeed?.()
+      const sceneBounds = sceneRef.current?.getBoundingClientRect()
+      const potBounds = potRef.current?.getBoundingClientRect()
+      const soilPoint = sceneBounds && potBounds
+        ? {
+            x: potBounds.left - sceneBounds.left + potBounds.width / 2,
+            y: potBounds.top - sceneBounds.top + potBounds.height * 0.23,
+          }
+        : point
+      updateDrag({ ...current, phase: 'planted', x: soilPoint.x, y: soilPoint.y })
+      plantSeedTimerRef.current = window.setTimeout(() => {
+        plantSeedTimerRef.current = null
+        updateDrag(idleDrag())
+        updateHovered(null)
+        onPlantSeed?.()
+      }, 1_000)
       return
     }
 
@@ -404,8 +423,8 @@ export function GardenScene({
     returnTimerRef.current = window.setTimeout(() => {
       updateDrag(idleDrag())
       updateHovered(null)
-    }, reducedMotion ? 20 : 220)
-  }, [localPoint, occupiedSlotAtPoint, onPlantFlower, onPlantSeed, onSeedDrop, overlapsPot, reducedMotion, returnDraggedItem, slotAtPoint, updateDrag, updateHovered])
+    }, 220)
+  }, [localPoint, occupiedSlotAtPoint, onPlantFlower, onPlantSeed, onSeedDrop, overlapsPot, returnDraggedItem, slotAtPoint, updateDrag, updateHovered])
 
   const chooseFlower = useCallback((flower: FlowerChoice) => {
     if (selectionPending || step !== 'choose') return
@@ -483,6 +502,7 @@ export function GardenScene({
 
   useEffect(() => () => {
     if (returnTimerRef.current !== null) window.clearTimeout(returnTimerRef.current)
+    if (plantSeedTimerRef.current !== null) window.clearTimeout(plantSeedTimerRef.current)
     if (selectionTimerRef.current !== null) window.clearTimeout(selectionTimerRef.current)
     if (transitionFrameRef.current !== null) cancelAnimationFrame(transitionFrameRef.current)
   }, [])
@@ -533,9 +553,10 @@ export function GardenScene({
   return (
     <div
       ref={sceneRef}
-      className={`garden-scene garden-scene--${step} garden-scene--interaction-${drag.phase} ${showGardenGrid ? 'garden-scene--placement' : 'garden-scene--nursery'} ${sunny ? 'garden-scene--sunny' : ''} ${raining ? 'garden-scene--raining' : ''}`}
+      className={`garden-scene garden-scene--${step} garden-scene--interaction-${drag.phase} ${showGardenGrid ? 'garden-scene--placement' : 'garden-scene--nursery'} ${gardenView ? 'garden-scene--garden-view' : ''} ${paused ? 'is-paused' : ''} ${sunny ? 'garden-scene--sunny' : ''} ${raining ? 'garden-scene--raining' : ''}`}
       data-weather-state={weatherState}
       data-scene={showGardenGrid ? 'placement' : 'nursery'}
+      style={{ '--sunlight-progress': Math.max(0, Math.min(1, sunProgress)) } as CSSProperties}
     >
       <AssetImage className="garden-scene__background" src={assets.background} alt="" width="1696" height="965" />
 
@@ -545,6 +566,8 @@ export function GardenScene({
           style={sunAnchor ? {
             '--sun-anchor-x': `${sunAnchor.x}px`,
             '--sun-anchor-y': `${sunAnchor.y}px`,
+            '--sun-ray-opacity': 0.08 + Math.max(0, Math.min(1, sunProgress)) * 0.74,
+            '--sun-ray-scale': 0.45 + Math.max(0, Math.min(1, sunProgress)) * 0.55,
           } as CSSProperties : undefined}
           type="button"
           onClick={onSunTap}
@@ -586,7 +609,6 @@ export function GardenScene({
           potRef={potRef}
           assets={assets.weather.droplets}
           active={weatherState === 'raining'}
-          reducedMotion={reducedMotion}
         />
       )}
 
@@ -617,7 +639,7 @@ export function GardenScene({
               </div>
             )
           })}
-          {step === 'place' && slots.map((slot) => slot.occupied ? (
+          {step === 'place' && !gardenView && slots.map((slot) => slot.occupied ? (
             <span
               key={slot.slotIndex}
               className="garden-slot garden-slot--occupied"
@@ -644,6 +666,9 @@ export function GardenScene({
               {slot.slotIndex + 1}
             </span>
           ))}
+          {gardenView && activePage.flowers.length === 0 && (
+            <p className="garden-empty-message" role="status">Your garden is waiting for its first flower.</p>
+          )}
         </div>
       )}
 
@@ -655,7 +680,7 @@ export function GardenScene({
         </nav>
       )}
 
-      {step === 'choose' && onSelectFlower && (
+      {!gardenView && step === 'choose' && onSelectFlower && (
         <div className={`garden-seed-options ${selectionPending ? 'is-exiting' : ''}`} role="group" aria-label="Choose a seed packet">
           {FLOWERS.map((flower) => (
             <button
@@ -676,7 +701,7 @@ export function GardenScene({
         </div>
       )}
 
-      {step === 'plant' && selected && (
+      {!gardenView && step === 'plant' && selected && (
         <button
           ref={looseSeedRef}
           className={`loose-seed-control ${hovered?.id === selected.id ? 'is-hovered' : ''} ${drag.kind === 'seed' ? 'is-grabbed' : ''}`}
@@ -691,7 +716,7 @@ export function GardenScene({
         </button>
       )}
 
-      {drag.flower && (
+      {!gardenView && drag.flower && (
         <AssetImage
           className={`${drag.kind === 'plant' ? 'plant-drag-item' : 'seed-drag-item'} ${drag.kind === 'plant' ? `plant-drag-item--${drag.flower.id}` : ''} ${drag.kind === 'seed' ? `seed-drag-item--${drag.phase}` : ''}`}
           style={{ left: drag.x, top: drag.y }}
@@ -701,7 +726,7 @@ export function GardenScene({
         />
       )}
 
-      {step === 'plant' && <div className={`pot-drop-zone ${dropZoneOverlap ? 'is-overlapping' : ''}`} aria-hidden="true" />}
+      {!gardenView && step === 'plant' && <div className={`pot-drop-zone ${dropZoneOverlap ? 'is-overlapping' : ''}`} aria-hidden="true" />}
 
       {!['welcome', 'choose'].includes(step) && (
         <div className="pot-area">
@@ -714,7 +739,7 @@ export function GardenScene({
                 '--growth-soil-crop': growthLayout.soilCrop,
               } as CSSProperties : undefined}
             >
-              <FlowerGrowthSequence flower={selected} frames={assets.flowers[selected.id]} active onComplete={onGrowthComplete} />
+              <FlowerGrowthSequence flower={selected} frames={assets.flowers[selected.id]} active paused={paused} onComplete={onGrowthComplete} />
             </div>
           )}
 
@@ -743,11 +768,12 @@ export function GardenScene({
             <span className="pot-soil-wet" aria-hidden="true"><i /><i /><i /></span>
           )}
           <AssetImage className="pot pot--base" ref={potRef} src={pot} alt={watered ? 'Watered flower pot' : planted ? 'Planted flower pot' : 'Empty flower pot'} />
+          {(step === 'grow' || step === 'place') && <span className="pot-soil-surface" aria-hidden="true" />}
           <AssetImage className="pot pot--front-rim" src={pot} alt="" aria-hidden="true" />
         </div>
       )}
 
-      {handCursor.visible && (
+      {!gardenView && handCursor.visible && (
         <AssetImage className="butterfly-cursor butterfly-cursor--garden" style={{ left: `${handCursor.x * 100}%`, top: `${handCursor.y * 100}%` }} src={assets.gestures.cursor} alt="" aria-hidden="true" />
       )}
 

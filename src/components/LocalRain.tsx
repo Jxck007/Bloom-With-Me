@@ -13,7 +13,6 @@ interface LocalRainProps {
   potRef: RefObject<HTMLImageElement | null>
   assets: RainAssets
   active: boolean
-  reducedMotion: boolean
 }
 
 interface RainZone {
@@ -36,7 +35,7 @@ interface Droplet {
 
 const EMPTY_ZONE: RainZone = { left: 0, top: 0, width: 0, height: 0 }
 
-export function LocalRain({ sceneRef, cloudRef, potRef, assets, active, reducedMotion }: LocalRainProps) {
+export function LocalRain({ sceneRef, cloudRef, potRef, assets, active }: LocalRainProps) {
   const [zone, setZone] = useState<RainZone>(EMPTY_ZONE)
   const [drops, setDrops] = useState<Droplet[]>([])
   const nextIdRef = useRef(0)
@@ -87,18 +86,18 @@ export function LocalRain({ sceneRef, cloudRef, potRef, assets, active, reducedM
 
     const spawn = () => {
       if (cancelled) return
-      const duration = reducedMotion ? 1_050 + Math.random() * 100 : 750 + Math.random() * 400
-      const delay = reducedMotion ? Math.random() * 100 : Math.random() * 140
+      const duration = 750 + Math.random() * 400
+      const delay = Math.random() * 140
       const id = ++nextIdRef.current
       const drop: Droplet = {
         id,
         src: dropletAssets[Math.floor(Math.random() * dropletAssets.length)],
         x: Math.random(),
-        width: reducedMotion ? 10 + Math.random() * 7 : Math.random() > 0.9 ? 21 + Math.random() * 4 : 9 + Math.random() * 12,
+        width: Math.random() > 0.9 ? 21 + Math.random() * 4 : 9 + Math.random() * 12,
         duration,
         opacity: 0.62 + Math.random() * 0.28,
         delay,
-        drift: reducedMotion ? 0 : -3 + Math.random() * 6,
+        drift: -3 + Math.random() * 6,
       }
       setDrops((current) => [...current, drop])
       const removalTimer = window.setTimeout(() => {
@@ -106,7 +105,7 @@ export function LocalRain({ sceneRef, cloudRef, potRef, assets, active, reducedM
         setDrops((current) => current.filter((item) => item.id !== id))
       }, duration + delay + 80)
       removalTimersRef.current.add(removalTimer)
-      spawnTimerRef.current = window.setTimeout(spawn, reducedMotion ? 300 + Math.random() * 120 : 110 + Math.random() * 80)
+      spawnTimerRef.current = window.setTimeout(spawn, 110 + Math.random() * 80)
     }
 
     spawn()
@@ -117,7 +116,7 @@ export function LocalRain({ sceneRef, cloudRef, potRef, assets, active, reducedM
         spawnTimerRef.current = null
       }
     }
-  }, [active, dropletAssets, reducedMotion, zone.height, zone.width])
+  }, [active, dropletAssets, zone.height, zone.width])
 
   useEffect(() => () => {
     removalTimersRef.current.forEach((timer) => window.clearTimeout(timer))
