@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -13,7 +14,7 @@ import { FLOWER_GROWTH_LAYOUT, GARDEN_FLOWER_TYPE_SCALE } from '../data/flowerLa
 import type { FlowerChoice, FlowerId } from '../data/flowers'
 import { FLOWERS } from '../data/flowers'
 import type { GameStep } from '../game/gameState'
-import type { GardenData } from '../game/gardenStorage'
+import type { GardenData, GardenFlower } from '../game/gardenStorage'
 import {
   findGardenSlotIncludingOccupied,
   findMagneticGardenSlot,
@@ -67,11 +68,11 @@ interface GardenSceneProps {
   sunExiting?: boolean
   watered: boolean
   growthStarted: boolean
+  growthStage?: number
   weatherState: WeatherState
   sunProgress?: number
   gardenView?: boolean
   paused?: boolean
-  onGrowthComplete?: () => void
 }
 
 const idleDrag = (): DragState => ({
@@ -84,6 +85,36 @@ const idleDrag = (): DragState => ({
   originX: 0,
   originY: 0,
   pointerId: null,
+})
+
+const PlantedFlowerSprite = memo(function PlantedFlowerSprite({
+  flower,
+  slot,
+  src,
+}: {
+  flower: GardenFlower
+  slot: GardenSlot
+  src: string
+}) {
+  return (
+    <div
+      className={`garden-plant garden-plant--${flower.flowerType} garden-plant--row-${slot.row}`}
+      style={{
+        left: `${slot.xPercent}%`,
+        top: `${slot.yPercent}%`,
+        '--slot-scale': slot.scale,
+        '--type-scale': GARDEN_FLOWER_TYPE_SCALE[flower.flowerType],
+        zIndex: 12 + slot.row,
+      } as CSSProperties}
+    >
+      <AssetImage
+        src={src}
+        alt={`${flower.flowerType} planted in garden slot ${flower.slotIndex + 1}`}
+        draggable={false}
+        loading="lazy"
+      />
+    </div>
+  )
 })
 
 export function GardenScene({
@@ -109,11 +140,11 @@ export function GardenScene({
   sunExiting = false,
   watered,
   growthStarted,
+  growthStage = 0,
   weatherState,
   sunProgress = 0,
   gardenView = false,
   paused = false,
-  onGrowthComplete,
 }: GardenSceneProps) {
   const sceneRef = useRef<HTMLDivElement>(null)
   const potRef = useRef<HTMLImageElement>(null)
@@ -173,10 +204,10 @@ export function GardenScene({
     if (step === 'plant') return [assets.pots.empty, assets.pots.planted, assets.weather.sun]
     if (step === 'sun') return [assets.weather.sun, assets.weather.sunRays, assets.weather.cloudNormal].filter((source): source is string => Boolean(source))
     if (step === 'rain') return [assets.weather.cloudNormal, assets.weather.cloudRain, ...Object.values(assets.weather.droplets), assets.pots.watered, ...flowerFrames.slice(0, 2)]
-    if (step === 'grow') return [assets.pots.watered, ...flowerFrames, assets.garden.plantingGrid]
+    if (step === 'grow') return [assets.pots.watered, flowerFrames[growthStage], flowerFrames[growthStage + 1]].filter((source): source is string => Boolean(source))
     if (step === 'place') return [assets.garden.plantingGrid, flowerFrames[5]].filter((source): source is string => Boolean(source))
     return [assets.background, assets.foreground]
-  }, [activePage.flowers, assets, gardenView, selected, step])
+  }, [activePage.flowers, assets, gardenView, growthStage, selected, step])
 
   useEffect(() => {
     preloadSources.forEach((src) => {
@@ -563,7 +594,7 @@ export function GardenScene({
       data-scene={gardenView ? 'garden-view' : showGardenGrid ? 'placement' : 'nursery'}
       style={{ '--sunlight-progress': Math.max(0, Math.min(1, sunProgress)) } as CSSProperties}
     >
-      <AssetImage className="garden-scene__background" src={assets.background} alt="" width="1696" height="965" />
+      {!gardenView && <AssetImage className="garden-scene__background" src={assets.background} alt="" width="1696" height="965" />}
 
       {showSun && (
         <button
@@ -628,21 +659,7 @@ export function GardenScene({
           <AssetImage className="garden-grid__base" src={assets.garden.plantingGrid} alt="Twelve planting spaces in three rows" draggable={false} width="1379" height="831" />
           {activePage.flowers.map((flower) => {
             const slot = GARDEN_SLOTS[flower.slotIndex]
-            return (
-              <div
-                key={flower.id}
-                className={`garden-plant garden-plant--${flower.flowerType} garden-plant--row-${slot.row}`}
-                style={{
-                  left: `${slot.xPercent}%`,
-                  top: `${slot.yPercent}%`,
-                  '--slot-scale': slot.scale,
-                  '--type-scale': GARDEN_FLOWER_TYPE_SCALE[flower.flowerType],
-                  zIndex: 12 + slot.row,
-                } as CSSProperties}
-              >
-                <AssetImage src={assets.flowers[flower.flowerType][5]} alt={`${flower.flowerType} planted in garden slot ${flower.slotIndex + 1}`} draggable={false} />
-              </div>
-            )
+            return <PlantedFlowerSprite key={flower.id} flower={flower} slot={slot} src={assets.flowers[flower.flowerType][5]} />
           })}
           {step === 'place' && !gardenView && slots.map((slot) => slot.occupied ? (
             <span
@@ -733,9 +750,9 @@ export function GardenScene({
 
       {!gardenView && step === 'plant' && <div className={`pot-drop-zone ${dropZoneOverlap ? 'is-overlapping' : ''}`} aria-hidden="true" />}
 
-      {!['welcome', 'choose'].includes(step) && (
-        <div className="pot-area">
-          {selected && step === 'grow' && growthStarted && onGrowthComplete && (
+      {!gardenView && !['welcome', 'choose'].includes(step) && (
+        <div className="pot-area pot-growth-composition">
+          {selected && step === 'grow' && growthStarted && (
             <div
               className="pot-growth-viewport"
               style={growthLayout ? {
@@ -744,7 +761,7 @@ export function GardenScene({
                 '--growth-soil-crop': growthLayout.soilCrop,
               } as CSSProperties : undefined}
             >
-              <FlowerGrowthSequence flower={selected} frames={assets.flowers[selected.id]} active paused={paused} onComplete={onGrowthComplete} />
+              <FlowerGrowthSequence flower={selected} frames={assets.flowers[selected.id]} stage={growthStage} active paused={paused} />
             </div>
           )}
 
@@ -782,7 +799,7 @@ export function GardenScene({
         <AssetImage className="butterfly-cursor butterfly-cursor--garden" style={{ left: `${handCursor.x * 100}%`, top: `${handCursor.y * 100}%` }} src={assets.gestures.cursor} alt="" aria-hidden="true" />
       )}
 
-      <AssetImage className="garden-scene__foreground" src={assets.foreground} alt="" width="1696" height="965" />
+      {!gardenView && <AssetImage className="garden-scene__foreground" src={assets.foreground} alt="" width="1696" height="965" />}
     </div>
   )
 }

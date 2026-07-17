@@ -21,8 +21,8 @@ export interface MediaPermissionResult {
 
 const VIDEO_CONSTRAINTS: MediaTrackConstraints = {
   facingMode: 'user',
-  width: { ideal: 1280 },
-  height: { ideal: 720 },
+  width: { ideal: 640 },
+  height: { ideal: 480 },
 }
 
 const initialResult: MediaPermissionResult = {

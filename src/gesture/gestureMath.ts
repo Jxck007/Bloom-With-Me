@@ -222,11 +222,11 @@ export function isWaving(samples: WristSample[]): boolean {
 }
 
 export type GrowGesturePhase =
-  | 'waitingForHand'
   | 'waitingForFist'
-  | 'fistHeld'
+  | 'fistStable'
   | 'waitingForOpen'
-  | 'growConfirmed'
+  | 'openStable'
+  | 'stageAdvanced'
   | 'cooldown'
 
 export type GrowPoseObservation = 'none' | 'other' | 'fist' | 'open'
@@ -247,7 +247,7 @@ export interface GrowGestureUpdate {
 
 export function initialGrowGestureTracker(): GrowGestureTracker {
   return {
-    phase: 'waitingForHand',
+    phase: 'waitingForFist',
     sequenceStartedAt: null,
     candidate: null,
     candidateSince: null,
@@ -279,7 +279,16 @@ export function updateCloseOpenGrow(
       ? { tracker: initialGrowGestureTracker(), confirmed: false }
       : { tracker: current, confirmed: false }
   }
-  if (current.phase === 'growConfirmed') {
+  if (current.phase === 'openStable') {
+    return {
+      tracker: {
+        ...current,
+        phase: 'stageAdvanced',
+      },
+      confirmed: false,
+    }
+  }
+  if (current.phase === 'stageAdvanced') {
     return {
       tracker: {
         ...current,
@@ -304,24 +313,9 @@ export function updateCloseOpenGrow(
     return {
       tracker: {
         ...initialGrowGestureTracker(),
-        phase: 'waitingForFist',
         sequenceStartedAt: now,
         candidate: observation === 'fist' ? 'fist' : null,
         candidateSince: observation === 'fist' ? now : null,
-      },
-      confirmed: false,
-    }
-  }
-
-  if (current.phase === 'waitingForHand') {
-    return {
-      tracker: {
-        ...current,
-        phase: 'waitingForFist',
-        sequenceStartedAt: now,
-        candidate: observation === 'fist' ? 'fist' : null,
-        candidateSince: observation === 'fist' ? now : null,
-        lostFrames: 0,
       },
       confirmed: false,
     }
@@ -330,18 +324,18 @@ export function updateCloseOpenGrow(
   if (current.phase === 'waitingForFist') {
     if (observation !== 'fist') {
       return {
-        tracker: { ...current, candidate: null, candidateSince: null, lostFrames: 0 },
+        tracker: { ...current, sequenceStartedAt: current.sequenceStartedAt ?? now, candidate: null, candidateSince: null, lostFrames: 0 },
         confirmed: false,
       }
     }
-    const tracker = withCandidate(current, 'fist', now)
+    const tracker = withCandidate({ ...current, sequenceStartedAt: current.sequenceStartedAt ?? now }, 'fist', now)
     if (now - (tracker.candidateSince ?? now) < GROW_POSE_STABLE_MS) {
       return { tracker, confirmed: false }
     }
     return {
       tracker: {
         ...tracker,
-        phase: 'fistHeld',
+        phase: 'fistStable',
         candidate: null,
         candidateSince: null,
       },
@@ -349,7 +343,7 @@ export function updateCloseOpenGrow(
     }
   }
 
-  if (current.phase === 'fistHeld') {
+  if (current.phase === 'fistStable') {
     return {
       tracker: {
         ...current,
@@ -376,7 +370,7 @@ export function updateCloseOpenGrow(
     return {
       tracker: {
         ...tracker,
-        phase: 'growConfirmed',
+        phase: 'openStable',
         candidate: null,
         candidateSince: null,
       },

@@ -59,7 +59,8 @@ export interface HandDebug {
 
 const WASM_ROOT = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm'
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
-const DETECTION_INTERVAL_MS = 40
+const DETECTION_INTERVAL_MS = 55
+const UI_UPDATE_INTERVAL_MS = 72
 
 function stopLiveTracks(stream: MediaStream | null) {
   stream?.getTracks().forEach((track) => {
@@ -84,7 +85,7 @@ const initialDebug = (): HandDebug => ({
   cursorY: null,
 })
 
-export function useHandTracking() {
+export function useHandTracking({ paused = false }: { paused?: boolean } = {}) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [status, setStatus] = useState<TrackingStatus>('not-started')
   const [cursor, setCursor] = useState<CursorPoint>({ x: 0.5, y: 0.5, visible: false })
@@ -111,6 +112,10 @@ export function useHandTracking() {
   const pinchStateRef = useRef<PinchState>('open')
   const pinchCandidateRef = useRef({ start: 0, release: 0 })
   const lostFrameRef = useRef(0)
+  const pausedRef = useRef(paused)
+  const lastUiUpdateRef = useRef(0)
+
+  pausedRef.current = paused
 
   const setTrackingStatus = useCallback((next: TrackingStatus) => {
     statusRef.current = next
@@ -216,30 +221,36 @@ export function useHandTracking() {
 
     if (!landmarks) {
       stableRef.current = { 'open-palm': 0, wave: 0 }
-      if (lostFrameRef.current > PINCH_LOST_FRAME_TOLERANCE || nextPinchState === 'open') {
+      const shouldUpdateUi = now - lastUiUpdateRef.current >= UI_UPDATE_INTERVAL_MS
+      if ((lostFrameRef.current > PINCH_LOST_FRAME_TOLERANCE || nextPinchState === 'open') && shouldUpdateUi) {
+        lastUiUpdateRef.current = now
         setCursor((current) => ({ ...current, visible: false }))
+        setDebug((current) => ({
+          ...current,
+          handVisible: false,
+          landmarks: [],
+          currentGesture: nextPinchState === 'pinching' ? 'pinch' : 'none',
+          confidence: 0,
+          handedness: '',
+          pinchRatio: null,
+          pinchState: nextPinchState,
+          lostFrameCount: lostFrameRef.current,
+          processingFps: fpsWindowRef.current.value,
+          cameraWidth: video?.videoWidth ?? 0,
+          cameraHeight: video?.videoHeight ?? 0,
+        }))
       }
-      setDebug((current) => ({
-        ...current,
-        handVisible: false,
-        landmarks: [],
-        currentGesture: nextPinchState === 'pinching' ? 'pinch' : 'none',
-        confidence: 0,
-        handedness: '',
-        pinchRatio: null,
-        pinchState: nextPinchState,
-        lostFrameCount: lostFrameRef.current,
-        processingFps: fpsWindowRef.current.value,
-        cameraWidth: video?.videoWidth ?? 0,
-        cameraHeight: video?.videoHeight ?? 0,
-      }))
       return
     }
 
     // MediaPipe coordinates are mirrored exactly once here for the garden cursor.
     const cursorX = 1 - landmarks[8].x
     const cursorY = landmarks[8].y
-    setCursor({ x: cursorX, y: cursorY, visible: true })
+    const shouldUpdateUi = now - lastUiUpdateRef.current >= UI_UPDATE_INTERVAL_MS
+    if (shouldUpdateUi) {
+      lastUiUpdateRef.current = now
+      setCursor({ x: cursorX, y: cursorY, visible: true })
+    }
 
     wristHistoryRef.current = [...wristHistoryRef.current, { x: 1 - landmarks[0].x, time: now }]
       .filter((sample) => now - sample.time < 1250)
@@ -277,30 +288,32 @@ export function useHandTracking() {
         ? scores[pose]
         : confidence
 
-    setDebug({
-      handVisible: true,
-      landmarks,
-      currentGesture,
-      confidence: gestureConfidence,
-      handedness,
-      pinchRatio: ratio,
-      pinchState: nextPinchState,
-      lostFrameCount: lostFrameRef.current,
-      delegate: delegateRef.current,
-      processingFps: fpsWindowRef.current.value,
-      cameraWidth: video?.videoWidth ?? 0,
-      cameraHeight: video?.videoHeight ?? 0,
-      cursorX,
-      cursorY,
-    })
+    if (shouldUpdateUi) {
+      setDebug({
+        handVisible: true,
+        landmarks,
+        currentGesture,
+        confidence: gestureConfidence,
+        handedness,
+        pinchRatio: ratio,
+        pinchState: nextPinchState,
+        lostFrameCount: lostFrameRef.current,
+        delegate: delegateRef.current,
+        processingFps: fpsWindowRef.current.value,
+        cameraWidth: video?.videoWidth ?? 0,
+        cameraHeight: video?.videoHeight ?? 0,
+        cursorX,
+        cursorY,
+      })
+    }
   }, [updatePinchState])
 
   const startLoop = useCallback(() => {
-    if (frameRef.current !== null || statusRef.current !== 'active' || document.hidden) return
+    if (frameRef.current !== null || statusRef.current !== 'active' || document.hidden || pausedRef.current) return
 
     const loop = (now: number) => {
       frameRef.current = null
-      if (statusRef.current !== 'active' || document.hidden) return
+      if (statusRef.current !== 'active' || document.hidden || pausedRef.current) return
 
       const video = videoRef.current
       const detector = landmarkerRef.current
@@ -388,8 +401,8 @@ export function useHandTracking() {
       stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: 'user',
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 640 },
+          height: { ideal: 480 },
         },
         audio: false,
       })
@@ -454,6 +467,15 @@ export function useHandTracking() {
     document.addEventListener('visibilitychange', onVisibilityChange)
     return () => document.removeEventListener('visibilitychange', onVisibilityChange)
   }, [startLoop, stopLoop])
+
+  useEffect(() => {
+    if (paused) {
+      stopLoop()
+      if (mountedRef.current) setCursor((current) => ({ ...current, visible: false }))
+      return
+    }
+    if (statusRef.current === 'active') startLoop()
+  }, [paused, startLoop, stopLoop])
 
   useEffect(() => {
     mountedRef.current = true

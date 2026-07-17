@@ -6,7 +6,7 @@ interface AssetImageProps extends ImgHTMLAttributes<HTMLImageElement> {
 }
 
 export const AssetImage = forwardRef<HTMLImageElement, AssetImageProps>(function AssetImage(
-  { draggable = false, onDragStart, onError, src, ...props },
+  { decoding = 'async', draggable = false, onDragStart, onError, src, ...props },
   ref,
 ) {
   const preferredSource = runtimeAssetPath(src)
@@ -21,6 +21,7 @@ export const AssetImage = forwardRef<HTMLImageElement, AssetImageProps>(function
       {...props}
       src={activeSource}
       ref={ref}
+      decoding={decoding}
       draggable={draggable}
       onDragStart={(event) => {
         event.preventDefault()
@@ -32,7 +33,7 @@ export const AssetImage = forwardRef<HTMLImageElement, AssetImageProps>(function
           setActiveSource(src)
           return
         }
-        console.error(`[Bloom asset] Failed to load image: ${src}`)
+        if (import.meta.env.DEV) console.error(`[Bloom asset] Failed to load image: ${src}`)
         event.currentTarget.style.visibility = 'hidden'
         onError?.(event)
       }}

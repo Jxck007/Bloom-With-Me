@@ -2,84 +2,66 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FlowerChoice } from '../data/flowers'
 import { AssetImage } from './AssetImage'
 
-const PRODUCTION_FLOWER_GROWTH_TOTAL_MS = 15_000
-const developmentGrowthMs = Number(import.meta.env.VITE_FLOWER_GROWTH_TOTAL_MS)
-
-export const FLOWER_GROWTH_TOTAL_MS = import.meta.env.DEV && Number.isFinite(developmentGrowthMs) && developmentGrowthMs >= 600
-  ? developmentGrowthMs
-  : PRODUCTION_FLOWER_GROWTH_TOTAL_MS
-
-// Six deliberately unhurried story beats totalling 15 seconds in production.
-const STAGE_WEIGHTS = [4_700, 4_700, 4_700, 5_100, 5_200, 5_600] as const
-const STAGE_DURATIONS_MS = STAGE_WEIGHTS.map((duration) => duration / 30_000 * FLOWER_GROWTH_TOTAL_MS)
-
 interface FlowerGrowthSequenceProps {
   flower: FlowerChoice
   frames: string[]
+  stage: number
   active: boolean
   paused?: boolean
-  onComplete: () => void
 }
 
-export function FlowerGrowthSequence({ flower, frames, active, paused = false, onComplete }: FlowerGrowthSequenceProps) {
-  const [ready, setReady] = useState(false)
-  const [stage, setStage] = useState(0)
-  const completedRef = useRef(false)
-  const onCompleteRef = useRef(onComplete)
-  onCompleteRef.current = onComplete
-
+export function FlowerGrowthSequence({ flower, frames, stage, active, paused = false }: FlowerGrowthSequenceProps) {
   const sixFrames = useMemo(() => frames.slice(0, 6), [frames])
+  const safeStage = Math.max(0, Math.min(sixFrames.length - 1, stage))
+  const previousStageRef = useRef(safeStage)
+  const [previousStage, setPreviousStage] = useState<number | null>(null)
 
   useEffect(() => {
-    let cancelled = false
-    setReady(false)
-    setStage(0)
-    completedRef.current = false
-
-    Promise.all(sixFrames.map((src) => new Promise<void>((resolve) => {
-      const image = new Image()
-      image.onload = () => resolve()
-      image.onerror = () => resolve()
-      image.src = src
-    }))).then(() => {
-      if (!cancelled) setReady(true)
-    })
-
-    return () => {
-      cancelled = true
+    if (previousStageRef.current !== safeStage) {
+      setPreviousStage(previousStageRef.current)
+      previousStageRef.current = safeStage
+      const timer = window.setTimeout(() => setPreviousStage(null), 820)
+      return () => window.clearTimeout(timer)
     }
-  }, [flower.id, sixFrames])
+    return undefined
+  }, [safeStage])
 
   useEffect(() => {
-    if (!active || !ready || paused || completedRef.current) return
+    if (!active || paused) return
+    const next = sixFrames[safeStage + 1]
+    if (!next) return
+    const image = new Image()
+    image.decoding = 'async'
+    image.src = next
+  }, [active, paused, safeStage, sixFrames])
 
-    const timer = window.setTimeout(() => {
-      if (stage < sixFrames.length - 1) {
-        setStage((current) => current + 1)
-        return
-      }
-      if (completedRef.current) return
-      completedRef.current = true
-      onCompleteRef.current()
-    }, STAGE_DURATIONS_MS[stage] ?? 0)
-
-    return () => window.clearTimeout(timer)
-  }, [active, paused, ready, sixFrames.length, stage])
+  const current = sixFrames[safeStage]
+  const previous = previousStage === null ? null : sixFrames[previousStage]
 
   return (
     <figure
-      className={`flower-growth flower-growth--${flower.id} flower-growth--stage-${stage} ${ready ? 'is-ready' : ''} ${stage === sixFrames.length - 1 ? 'is-blooming' : ''}`}
-      aria-label={`${flower.name} growth, stage ${stage + 1} of ${sixFrames.length}`}
+      className={`flower-growth flower-growth--${flower.id} flower-growth--stage-${safeStage} is-ready ${safeStage === sixFrames.length - 1 ? 'is-blooming' : ''}`}
+      aria-label={`${flower.name} growth, stage ${safeStage + 1} of ${sixFrames.length}`}
     >
-      {sixFrames.map((src, index) => (
+      {previous && previous !== current && (
         <AssetImage
-          key={src}
-          className={`flower-growth__frame ${index === stage ? 'is-current' : ''} ${index === stage - 1 ? 'is-previous' : ''}`}
-          src={src}
-          alt={index === stage ? `${flower.name} growth stage ${index + 1} of ${sixFrames.length}` : ''}
-          aria-hidden={index !== stage}
+          key={`previous-${previous}`}
+          className="flower-growth__frame is-previous"
+          src={previous}
+          alt=""
+          aria-hidden="true"
+          decoding="async"
         />
-      ))}
+      )}
+      {current && (
+        <AssetImage
+          key={`current-${current}`}
+          className="flower-growth__frame is-current"
+          src={current}
+          alt={`${flower.name} growth stage ${safeStage + 1} of ${sixFrames.length}`}
+          decoding="async"
+        />
+      )}
       <span className="flower-growth__magic" aria-hidden="true" />
     </figure>
   )

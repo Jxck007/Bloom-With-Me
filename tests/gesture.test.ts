@@ -107,11 +107,11 @@ test('close-open grow requires stable fist before stable open palm', () => {
 
   tracker = updateCloseOpenGrow(update.tracker, 'fist', 600).tracker
   tracker = updateCloseOpenGrow(tracker, 'fist', 600 + GROW_POSE_STABLE_MS).tracker
-  assert.equal(tracker.phase, 'fistHeld')
+  assert.equal(tracker.phase, 'fistStable')
   tracker = updateCloseOpenGrow(tracker, 'open', 1100).tracker
   update = updateCloseOpenGrow(tracker, 'open', 1100 + GROW_POSE_STABLE_MS)
   assert.equal(update.confirmed, true)
-  assert.equal(update.tracker.phase, 'growConfirmed')
+  assert.equal(update.tracker.phase, 'openStable')
 })
 
 test('close-open grow tolerates two lost frames and applies cooldown', () => {
@@ -123,7 +123,9 @@ test('close-open grow tolerates two lost frames and applies cooldown', () => {
   }
   const confirmed = updateCloseOpenGrow(tracker, 'open', 500 + GROW_POSE_STABLE_MS)
   assert.equal(confirmed.confirmed, true)
-  const cooldown = updateCloseOpenGrow(confirmed.tracker, 'open', 1000).tracker
+  const advanced = updateCloseOpenGrow(confirmed.tracker, 'open', 1000).tracker
+  assert.equal(advanced.phase, 'stageAdvanced')
+  const cooldown = updateCloseOpenGrow(advanced, 'open', 1016).tracker
   assert.equal(cooldown.phase, 'cooldown')
   assert.equal(updateCloseOpenGrow(cooldown, 'open', 1000 + GROW_GESTURE_COOLDOWN_MS - 1).confirmed, false)
 })
