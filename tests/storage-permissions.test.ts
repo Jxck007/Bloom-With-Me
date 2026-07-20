@@ -77,6 +77,23 @@ test('invalid stored garden data is ignored safely', () => {
   assert.equal(loadGardenData(storage).pages[0].flowers.length, 0)
 })
 
+test('stored garden active page is clamped without losing valid pages', () => {
+  const storage = new MemoryStorage()
+  storage.setItem(GARDEN_STORAGE_KEY, JSON.stringify({
+    version: 1,
+    activePageIndex: 8,
+    pages: [
+      { id: 'garden-a', flowers: [{ id: 'a', flowerType: 'rose', slotIndex: 0, plantedAt: 1 }] },
+      { id: 'garden-b', flowers: [{ id: 'b', flowerType: 'sunflower', slotIndex: 3, plantedAt: 2 }] },
+    ],
+  }))
+
+  const restored = loadGardenData(storage)
+  assert.equal(restored.activePageIndex, 1)
+  assert.equal(restored.pages.length, 2)
+  assert.deepEqual(restored.pages.map((page) => page.flowers.length), [1, 1])
+})
+
 test('garden slots expose collision-free 4 by 3 percentage coordinates', () => {
   assert.equal(GARDEN_SLOTS.length, 12)
   assert.deepEqual([...new Set(GARDEN_SLOTS.map((slot) => slot.column))], [0, 1, 2, 3])

@@ -55,7 +55,11 @@ interface VoiceSession {
   gate: VocalGateState
   lastEncouragementAt: number
   lastMeterUpdateAt: number
+  feedbackIndex: number
 }
+
+const VOICE_PROMPTS = ['Say Bloom', 'Say Grow', 'Hello Flower!', 'Keep Talking!', 'Wonderful!'] as const
+const VOICE_REWARDS = ['🌱 Good!', '🌼 Growing...'] as const
 
 function stopLiveTracks(stream: MediaStream | null) {
   stream?.getTracks().forEach((track) => {
@@ -80,7 +84,7 @@ function disposeSession(session: VoiceSession) {
   if (session.audioContext && session.audioContext.state !== 'closed') void session.audioContext.close()
 }
 
-export function useVoiceTrigger(onTrigger: () => void) {
+export function useVoiceTrigger(onTrigger: () => void, onReward?: () => void) {
   const [status, setStatus] = useState<VoiceStatus>('idle')
   const [level, setLevel] = useState(0)
   const [soundProgress, setSoundProgress] = useState(0)
@@ -123,14 +127,15 @@ export function useVoiceTrigger(onTrigger: () => void) {
     cooldownUntilRef.current = now + VOICE_COOLDOWN_MS
     setStatus('heard')
     setSoundProgress(1)
-    setFeedback(source === 'speech' ? 'I heard you — Let’s grow!' : 'Keep going… Let’s grow!')
+    setFeedback(source === 'speech' ? '🌱 Good!' : '🌼 Growing...')
+    onReward?.()
     cleanupSession()
     clearCompletionTimer()
     completionTimerRef.current = window.setTimeout(() => {
       completionTimerRef.current = null
       onTrigger()
     }, 520)
-  }, [cleanupSession, clearCompletionTimer, onTrigger])
+  }, [cleanupSession, clearCompletionTimer, onReward, onTrigger])
 
   const recalibrate = useCallback(() => {
     const session = sessionRef.current
@@ -173,6 +178,7 @@ export function useVoiceTrigger(onTrigger: () => void) {
       gate: initialVocalGateState(performance.now()),
       lastEncouragementAt: performance.now(),
       lastMeterUpdateAt: 0,
+      feedbackIndex: 0,
     }
     sessionRef.current = session
 
@@ -232,8 +238,9 @@ export function useVoiceTrigger(onTrigger: () => void) {
           const normalized = normalizeTranscript(pieces.join(' '))
           if (!normalized) return
           setTranscript(normalized.slice(-72))
-          if (matchesGrowthPhrase(normalized)) complete('speech')
-          else setFeedback(hasFinalResult ? 'Try again' : 'Keep going')
+          if (!session.analyser && (hasFinalResult || normalized.length >= 3 || matchesGrowthPhrase(normalized))) complete('speech')
+          else if (session.gate.progress > 0) setFeedback(VOICE_REWARDS[Math.min(VOICE_REWARDS.length - 1, Math.floor(session.gate.progress * 2))])
+          else setFeedback(hasFinalResult ? 'Wonderful!' : 'Keep Talking!')
         }
         recognition.onnomatch = () => {
           if (session.active && !triggeredRef.current) setFeedback('Try again')
@@ -297,17 +304,18 @@ export function useVoiceTrigger(onTrigger: () => void) {
           if (now - session.lastMeterUpdateAt >= 50) {
             session.lastMeterUpdateAt = now
             const meterRange = Math.max(0.02, session.gate.threshold)
-            setLevel(Math.min(1, rms / meterRange))
+            setLevel(Math.min(1, session.gate.smoothedRms / meterRange))
             setSoundProgress(session.gate.progress)
 
             if (session.gate.calibrated) {
               setStatus('listening')
-              if (session.gate.progress > 0) setFeedback('Keep going')
+              if (session.gate.progress > 0) setFeedback(session.gate.progress > 0.58 ? '🌼 Growing...' : '🌱 Good!')
               else if (now - session.lastEncouragementAt > 5000) {
                 session.lastEncouragementAt = now
-                setFeedback('Try again')
+                session.feedbackIndex = (session.feedbackIndex + 1) % VOICE_PROMPTS.length
+                setFeedback(VOICE_PROMPTS[session.feedbackIndex])
               } else {
-                setFeedback((current) => current === 'Try again' || current === 'Voice is not available here' ? current : 'Listening')
+                setFeedback((current) => current === 'Voice is not available here' ? current : VOICE_PROMPTS[session.feedbackIndex])
               }
             }
           }

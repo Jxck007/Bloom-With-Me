@@ -412,6 +412,11 @@ button:focus-visible {
 }
 
 .garden-scene--garden-view {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 420px;
+  padding: clamp(58px, 8vh, 86px) clamp(12px, 3vw, 28px) clamp(18px, 3vh, 28px);
   background:
     radial-gradient(circle at 50% 24%, rgba(255, 246, 225, 0.72), transparent 35%),
     linear-gradient(135deg, #fff6e8 0%, #f5e9d9 100%);
@@ -470,13 +475,21 @@ button:focus-visible {
 }
 
 .garden-scene--garden-view .garden-grid {
-  left: 50%;
-  top: 52%;
-  width: min(82%, 1120px);
-  background: rgba(255, 250, 243, 0.54);
-  border-radius: 32px;
+  position: relative;
+  z-index: 20;
+  left: auto;
+  top: auto;
+  width: min(78vw, 980px);
+  max-height: calc(100vh - 170px);
+  min-height: 180px;
+  aspect-ratio: 1379 / 831;
+  background: rgba(255, 250, 243, 0.62);
+  border-radius: 22px;
   padding: 12px;
   box-shadow: 0 20px 42px rgba(77, 55, 44, 0.12);
+  opacity: 1;
+  transform: none;
+  animation: none;
 }
 
 .garden-scene--garden-view::after {
@@ -618,8 +631,8 @@ button:focus-visible {
   z-index: 15;
   left: 50%;
   bottom: 4%;
-  width: clamp(240px, 24vw, 320px);
-  height: clamp(270px, 44vh, 380px);
+  width: clamp(250px, 22vw, 310px);
+  height: clamp(270px, 40vh, 360px);
   transform: translateX(-50%);
   pointer-events: none;
   transition: left 500ms ease, opacity 500ms ease, transform 500ms ease;
@@ -645,7 +658,7 @@ button:focus-visible {
   z-index: var(--pot-layer-base);
   left: 50%;
   bottom: 0;
-  width: clamp(190px, 15vw, 230px);
+  width: clamp(220px, 18vw, 270px);
   height: auto;
   max-width: 100%;
   max-height: none;
@@ -927,14 +940,14 @@ button:focus-visible {
 }
 
 .seed-drag-item--planted {
-  animation: seedSinkIntoSoil 1s cubic-bezier(0.22, 0.7, 0.28, 1) both;
+  animation: seedSinkIntoSoil 1.12s cubic-bezier(0.22, 0.7, 0.28, 1) both;
 }
 
 .loose-seed-control {
   position: absolute;
   z-index: 12;
-  left: 34%;
-  bottom: 38%;
+  left: 31%;
+  bottom: 36%;
   width: clamp(96px, 9vw, 124px);
   height: clamp(96px, 9vw, 124px);
   padding: 0;
@@ -957,8 +970,10 @@ button:focus-visible {
 }
 
 .loose-seed-control.is-grabbed {
-  opacity: 0.15;
+  opacity: 0 !important;
+  visibility: hidden;
   transform: translateX(-50%) scale(0.94);
+  pointer-events: none;
 }
 
 .loose-seed-control img {
@@ -1177,9 +1192,21 @@ button:focus-visible {
   inset: 0;
   width: 100%;
   height: 100%;
+  display: block;
   object-fit: contain;
+  opacity: 1;
   pointer-events: none;
   user-select: none;
+}
+
+.garden-scene--garden-view .garden-grid__base {
+  position: absolute;
+  display: block;
+  width: 100%;
+  max-height: calc(100vh - 170px);
+  height: auto;
+  object-fit: contain;
+  opacity: 1;
 }
 
 .garden-plant {
@@ -1187,10 +1214,14 @@ button:focus-visible {
   width: 13%;
   height: 28%;
   --responsive-scale: 1;
-  transform: translate(-50%, -94%) scale(var(--slot-scale)) scale(var(--type-scale)) scale(var(--responsive-scale));
+  opacity: 1;
+  transform: translate3d(-50%, -94%, 0) scale(var(--slot-scale)) scale(var(--type-scale)) scale(var(--responsive-scale));
   transform-origin: center bottom;
+  mix-blend-mode: normal;
+  filter: none;
+  will-change: transform;
   pointer-events: none;
-  animation: gardenPlantSnap 420ms cubic-bezier(0.2, 0.8, 0.25, 1) both;
+  animation: none;
 }
 
 .garden-plant--sunflower {
@@ -1210,7 +1241,11 @@ button:focus-visible {
   object-fit: contain;
   object-position: center bottom;
   clip-path: polygon(0 0, 100% 0, 100% 80%, 76% 80%, 68% 100%, 32% 100%, 24% 80%, 0 80%);
-  filter: drop-shadow(0 7px 8px rgba(70, 51, 43, 0.13));
+  opacity: 1;
+  filter: none;
+  mix-blend-mode: normal;
+  transform: translate3d(0, 0, 0);
+  will-change: transform;
 }
 
 .garden-slot {
@@ -1415,21 +1450,23 @@ button:focus-visible {
 
 .pot-drop-zone {
   position: absolute;
-  z-index: 6;
-  left: 50%;
-  bottom: 1%;
-  width: clamp(260px, 34vw, 390px);
-  height: clamp(230px, 44vh, 390px);
+  z-index: 14;
+  left: 56%;
+  bottom: 7%;
+  width: clamp(180px, 19vw, 260px);
+  height: clamp(120px, 14vw, 190px);
   transform: translateX(-50%);
-  border: 3px dashed transparent;
+  border: 0;
   border-radius: 48%;
   pointer-events: none;
-  transition: border-color 180ms ease, background 180ms ease;
+  opacity: 0;
+  transition: opacity 180ms ease, background 180ms ease, box-shadow 180ms ease;
 }
 
 .pot-drop-zone.is-overlapping {
-  border-color: rgba(96, 126, 84, 0.62);
-  background: rgba(231, 239, 214, 0.2);
+  opacity: 1;
+  background: rgba(231, 239, 214, 0.18);
+  box-shadow: 0 0 34px rgba(126, 151, 96, 0.18);
 }
 
 /* Instruction card */
@@ -1605,7 +1642,7 @@ button:focus-visible {
   line-height: 1.35;
 }
 
-.grow-gesture-progress {
+.growth-progress {
   width: 100%;
   margin: 4px 0 0;
   padding: 9px 11px;
@@ -1616,19 +1653,7 @@ button:focus-visible {
   font-weight: 850;
 }
 
-.grow-gesture-progress--fistStable,
-.grow-gesture-progress--waitingForOpen {
-  background: rgba(247, 226, 193, 0.78);
-  color: #775b3d;
-}
-
-.grow-gesture-progress--openStable,
-.grow-gesture-progress--stageAdvanced {
-  background: rgba(220, 231, 213, 0.82);
-  color: #52694d;
-}
-
-.grow-gesture-progress__bar {
+.growth-progress__bar {
   height: 7px;
   margin: 7px 0 3px;
   border-radius: 999px;
@@ -1636,7 +1661,7 @@ button:focus-visible {
   background: rgba(255, 255, 255, 0.64);
 }
 
-.grow-gesture-progress__bar i {
+.growth-progress__bar i {
   display: block;
   width: 100%;
   height: 100%;
@@ -1645,7 +1670,7 @@ button:focus-visible {
   border-radius: inherit;
 }
 
-.grow-gesture-progress small {
+.growth-progress small {
   display: block;
   font-size: 0.7rem;
   color: inherit;
@@ -1655,13 +1680,109 @@ button:focus-visible {
 .voice-listening {
   width: 100%;
   margin-top: 8px;
+  position: relative;
+  min-height: 44px;
+  padding: 6px 0 0;
   color: var(--muted);
   font-size: 0.74rem;
+}
+
+.voice-listening--active {
+  color: #52694d;
+}
+
+.voice-listening--active > span:first-child,
+.voice-listening--heard > span:first-child {
+  font-weight: 850;
 }
 
 .voice-listening .voice-meter {
   margin-top: 5px;
   height: 7px;
+}
+
+.voice-growth-effect {
+  position: absolute;
+  z-index: 0;
+  right: 8px;
+  bottom: 2px;
+  width: 64px;
+  height: 44px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate3d(0, 6px, 0) scale(0.96);
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+
+.voice-listening--active .voice-growth-effect,
+.voice-listening--heard .voice-growth-effect {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
+}
+
+.voice-growth-effect::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  width: 36px;
+  height: 18px;
+  border: 2px solid rgba(145, 169, 111, 0.42);
+  border-radius: 50%;
+  transform: translate3d(-50%, 0, 0) scale(0.8);
+  animation: voiceGlowRing 900ms ease-out infinite;
+}
+
+.voice-growth-effect::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  width: 5px;
+  height: 24px;
+  border-radius: 999px;
+  background: linear-gradient(#91a96f, #c7d7a5);
+  transform: translate3d(-50%, 0, 0) scaleY(0.8);
+  transform-origin: center bottom;
+  animation: voiceStemStretch 760ms ease-in-out infinite alternate;
+}
+
+.voice-growth-effect i,
+.voice-growth-effect b {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+}
+
+.voice-growth-effect i {
+  width: 9px;
+  height: 6px;
+  border-radius: 999px 999px 999px 0;
+  background: rgba(126, 151, 96, 0.78);
+  transform-origin: center;
+  animation: voiceLeafFloat 1.15s ease-in-out infinite;
+}
+
+.voice-growth-effect i:nth-child(1) { left: 25px; bottom: 20px; animation-delay: -0.2s; }
+.voice-growth-effect i:nth-child(2) { left: 34px; bottom: 26px; transform: scaleX(-1); animation-delay: -0.48s; }
+.voice-growth-effect i:nth-child(3) { left: 19px; bottom: 30px; animation-delay: -0.72s; }
+
+.voice-growth-effect b {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(232, 193, 104, 0.88);
+  box-shadow: 0 0 8px rgba(232, 193, 104, 0.5);
+  animation: voiceSparkle 1.05s ease-in-out infinite;
+}
+
+.voice-growth-effect b:nth-of-type(1) { left: 12px; top: 9px; }
+.voice-growth-effect b:nth-of-type(2) { right: 13px; top: 4px; animation-delay: -0.5s; }
+
+.voice-listening > span:not(.voice-growth-effect),
+.voice-listening .voice-meter {
+  position: relative;
+  z-index: 1;
 }
 
 .voice-unavailable {
@@ -2006,14 +2127,33 @@ button:focus-visible {
 }
 
 @keyframes seedSinkIntoSoil {
-  0% { opacity: 1; transform: translate(-50%, -52%) scale(1); }
-  58% { opacity: 0.96; transform: translate(-50%, -42%) scale(0.92); }
-  100% { opacity: 0; transform: translate(-50%, 14%) scale(0.68); }
+  0%, 78% { opacity: 1; transform: translate(-50%, -52%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -22%) scale(0.72); }
 }
 
 @keyframes gardenPlantSnap {
   from { opacity: 0.35; transform: translate(-50%, -90%) scale(var(--slot-scale)) scale(var(--type-scale)) scale(var(--responsive-scale)); }
   to { opacity: 1; transform: translate(-50%, -94%) scale(var(--slot-scale)) scale(var(--type-scale)) scale(var(--responsive-scale)); }
+}
+
+@keyframes voiceGlowRing {
+  from { opacity: 0.7; transform: translate3d(-50%, 0, 0) scale(0.72); }
+  to { opacity: 0; transform: translate3d(-50%, 0, 0) scale(1.28); }
+}
+
+@keyframes voiceStemStretch {
+  from { transform: translate3d(-50%, 0, 0) scaleY(0.78); }
+  to { transform: translate3d(-50%, -3px, 0) scaleY(1.08); }
+}
+
+@keyframes voiceLeafFloat {
+  0%, 100% { opacity: 0.55; transform: translate3d(0, 3px, 0) rotate(-10deg) scale(0.9); }
+  50% { opacity: 1; transform: translate3d(0, -2px, 0) rotate(9deg) scale(1.08); }
+}
+
+@keyframes voiceSparkle {
+  0%, 100% { opacity: 0.25; transform: translate3d(0, 4px, 0) scale(0.65); }
+  50% { opacity: 1; transform: translate3d(0, -3px, 0) scale(1.2); }
 }
 
 @keyframes nearestSlotPulse {
@@ -2126,20 +2266,20 @@ button:focus-visible {
   }
 
   .loose-seed-control {
-    left: 35%;
-    bottom: 41%;
+    left: 30%;
+    bottom: 38%;
     width: clamp(86px, 11vw, 108px);
     height: clamp(86px, 11vw, 108px);
   }
 
   .pot-area {
     bottom: 17%;
-    width: clamp(220px, 31vw, 270px);
-    height: clamp(250px, 39vh, 320px);
+    width: clamp(220px, 30vw, 270px);
+    height: clamp(245px, 37vh, 310px);
   }
 
   .pot {
-    width: clamp(150px, 22vw, 190px);
+    width: clamp(190px, 24vw, 230px);
   }
 
   .garden-weather-action--sun {
@@ -2167,9 +2307,27 @@ button:focus-visible {
     --responsive-scale: 0.92;
   }
 
+  .garden-scene--garden-view {
+    min-height: 420px;
+    padding: 62px 12px 18px;
+  }
+
   .garden-grid,
   .garden-grid--revealed {
     top: 46%;
+  }
+
+  .garden-scene--garden-view .garden-grid,
+  .garden-scene--garden-view .garden-grid--revealed {
+    top: auto;
+    left: auto;
+    width: min(78vw, 900px);
+    max-height: calc(100vh - 150px);
+    transform: none;
+  }
+
+  .garden-scene--garden-view .garden-grid__base {
+    max-height: calc(100vh - 150px);
   }
 
   .garden-weather-action--cloud {
@@ -2352,8 +2510,8 @@ button:focus-visible {
 
   .pot-area {
     bottom: 37%;
-    width: 150px;
-    height: 200px;
+    width: 190px;
+    height: 230px;
   }
 
   .garden-scene--choose .pot-area {
@@ -2365,9 +2523,9 @@ button:focus-visible {
   }
 
   .pot {
-    width: 112px;
+    width: clamp(155px, 43vw, 180px);
     height: auto;
-    max-height: 60%;
+    max-height: 78%;
   }
 
   .flower-art {
@@ -2441,8 +2599,8 @@ button:focus-visible {
   }
 
   .loose-seed-control {
-    left: 34%;
-    bottom: 55%;
+    left: 30%;
+    bottom: 57%;
     width: clamp(74px, 24vw, 94px);
     height: clamp(74px, 24vw, 94px);
   }
@@ -2543,6 +2701,26 @@ button:focus-visible {
     top: 62%;
     right: auto;
     left: 50%;
+  }
+
+  .garden-scene--garden-view {
+    min-height: 360px;
+    padding: 58px 8px 12px;
+  }
+
+  .garden-scene--garden-view .garden-grid,
+  .garden-scene--garden-view .garden-grid--revealed {
+    top: auto;
+    left: auto;
+    width: min(92vw, 980px);
+    max-height: calc(100vh - 150px);
+    transform: none;
+  }
+
+  .garden-scene--garden-view .garden-pagination {
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
   }
 
   .garden-scene--placement .pot-area {

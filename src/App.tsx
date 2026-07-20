@@ -22,12 +22,6 @@ import { useHandTracking, type TrackingStatus } from './hooks/useHandTracking'
 import { useMediaPermissions } from './hooks/useMediaPermissions'
 import { useVoiceTrigger } from './hooks/useVoiceTrigger'
 import {
-  initialGrowGestureTracker,
-  updateCloseOpenGrow,
-  type GrowGesturePhase,
-  type GrowPoseObservation,
-} from './gesture/gestureMath'
-import {
   initialSunHoldTracker,
   SUN_HOLD_MAX_MS,
   SUN_HOLD_MIN_MS,
@@ -80,8 +74,8 @@ const STEP_COPY: Record<Exclude<GameStep, 'welcome' | 'choose' | 'place'>, {
   },
   grow: {
     eyebrow: 'Help it grow',
-    title: 'Close your hand, then open it.',
-    instruction: 'Or say Grow, make a sound, or tap below.',
+    title: 'Say Grow',
+    instruction: 'Say Grow, make a gentle sound, or tap below.',
     touchLabel: 'Tap to Grow',
   },
 }
@@ -92,7 +86,6 @@ function App() {
   const [selected, setSelected] = useState<FlowerChoice | null>(null)
   const [garden, setGarden] = useState<GardenData>(loadGardenData)
   const [voiceStarted, setVoiceStarted] = useState(false)
-  const [growGesturePhase, setGrowGesturePhase] = useState<GrowGesturePhase>('waitingForFist')
   const [isFullscreen, setIsFullscreen] = useState(Boolean(document.fullscreenElement))
   const [viewingGarden, setViewingGarden] = useState(false)
   const [sunCelebrating, setSunCelebrating] = useState(false)
@@ -130,7 +123,6 @@ function App() {
   const growthCompletionTimerRef = useRef<number | null>(null)
   const weatherBusyRef = useRef(false)
   const placingRef = useRef(false)
-  const growGestureRef = useRef(initialGrowGestureTracker())
   const viewingGardenRef = useRef(false)
   const { muted, play: playSound, toggleMuted } = useAudioManager()
   const media = useMediaPermissions()
@@ -210,7 +202,9 @@ function App() {
     feedback: voiceFeedback,
     start: startVoice,
     stop: stopVoice,
-  } = useVoiceTrigger(advanceGrowthStage)
+  } = useVoiceTrigger(advanceGrowthStage, () => {
+    void playSound('voice-grow')
+  })
 
   const disableHandsAndVoice = useCallback(() => {
     disableCamera()
@@ -218,21 +212,6 @@ function App() {
     setVoiceStarted(false)
     media.stop()
   }, [disableCamera, media.stop, stopVoice])
-
-  useEffect(() => {
-    if (viewingGarden || step !== 'grow' || growthCompletionTimerRef.current !== null) return
-    const observation: GrowPoseObservation = !handDebug.handVisible
-      ? 'none'
-      : handDebug.currentGesture === 'fist'
-        ? 'fist'
-        : handDebug.currentGesture === 'open-palm'
-          ? 'open'
-          : 'other'
-    const next = updateCloseOpenGrow(growGestureRef.current, observation, performance.now())
-    growGestureRef.current = next.tracker
-    setGrowGesturePhase((current) => current === next.tracker.phase ? current : next.tracker.phase)
-    if (next.confirmed) advanceGrowthStage()
-  }, [advanceGrowthStage, handDebug.currentGesture, handDebug.handVisible, handDebug.landmarks, step, viewingGarden])
 
   const finishSunStage = useCallback(() => {
     if (stepRef.current !== 'sun' || weatherBusyRef.current) return
@@ -363,8 +342,6 @@ function App() {
       setGrowthStage(0)
       growthStartedRef.current = false
       growthStageRef.current = 0
-      growGestureRef.current = initialGrowGestureTracker()
-      setGrowGesturePhase('waitingForFist')
       stopVoice()
     } else if (growthCompletionTimerRef.current !== null) {
       setVoiceStarted(false)
@@ -522,6 +499,9 @@ function App() {
   const openGardenView = () => {
     if (interactionDebug.phase !== 'idle') return
     void playSound('button-tap')
+    const latestGarden = loadGardenData()
+    gardenRef.current = latestGarden
+    setGarden(latestGarden)
     viewingGardenRef.current = true
     setViewingGarden(true)
   }
@@ -535,7 +515,6 @@ function App() {
 
   const useTouchFallback = () => {
     if (step === 'grow') {
-      stopVoice()
       advanceGrowthStage()
     } else if (step === 'sun') {
       expandSunFromTouch()
@@ -581,11 +560,9 @@ function App() {
             ? 'The rain is resting'
             : rainGuide
       : step === 'grow'
-        ? growGesturePhase === 'openStable' || growGesturePhase === 'stageAdvanced'
+        ? growthStarted
           ? 'The flower is growing!'
-          : growGesturePhase === 'fistStable' || growGesturePhase === 'waitingForOpen'
-            ? 'Now open it'
-            : 'Close your hand'
+          : currentStepCopy?.title
         : currentStepCopy?.title
   const gestureAsset = step === 'plant'
     ? assets.gestures.pinch
@@ -594,12 +571,6 @@ function App() {
       : step === 'rain'
         ? assets.gestures.wave
         : assets.gestures.palm
-  const growGestureCopy = growGesturePhase === 'fistStable' || growGesturePhase === 'waitingForOpen'
-    ? 'Now open it'
-    : growGesturePhase === 'openStable' || growGesturePhase === 'stageAdvanced'
-      ? 'The flower is growing!'
-      : 'Close your hand'
-
   return (
     <main className="app-shell">
       {step === 'welcome' && (
@@ -753,7 +724,7 @@ function App() {
                       : step === 'rain'
                                 ? rainGestureArmed ? 'Keep your palm open and wave gently left and right.' : 'Relax your hand once, then wave.'
                                 : step === 'grow'
-                                  ? 'Close your hand, then open your palm. Each gesture grows one stage.'
+                                  ? 'Say Grow, make a gentle sound, or tap below. Each action grows one stage.'
                                   : currentStepCopy.instruction}
                   </p>
 
@@ -776,9 +747,9 @@ function App() {
                   )}
 
                   {step === 'grow' && (
-                    <div className={`grow-gesture-progress grow-gesture-progress--${growGesturePhase}`} role="status">
-                      <span>{growGestureCopy}</span>
-                      <div className="grow-gesture-progress__bar" aria-label={`Flower growth stage ${growthStage + 1} of 6`}>
+                    <div className="growth-progress" role="status">
+                      <span>Voice, sound, or tap grows one stage.</span>
+                      <div className="growth-progress__bar" aria-label={`Flower growth stage ${growthStage + 1} of 6`}>
                         <i style={{ transform: `scaleX(${growthStage / 5})` }} />
                       </div>
                       <small>Stage {growthStage + 1} of 6 · {growthProgressPercent}%</small>
@@ -786,9 +757,16 @@ function App() {
                   )}
 
                   {step === 'grow' && voiceStarted && (
-                    <div className="voice-listening" role="status">
+                    <div className={`voice-listening ${soundProgress > 0 ? 'voice-listening--active' : ''} ${voiceStatus === 'heard' ? 'voice-listening--heard' : ''}`} role="status">
                       <span>{voiceStatus === 'heard' ? voiceFeedback : 'Voice & sound listening'}</span>
                       {voiceTranscript && <span className="voice-status__transcript">Heard: “{voiceTranscript}”</span>}
+                      <span className="voice-growth-effect" aria-hidden="true">
+                        <i />
+                        <i />
+                        <i />
+                        <b />
+                        <b />
+                      </span>
                       <div className="voice-meter" role="progressbar" aria-label="Microphone level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(voiceLevel * 100)}>
                         <span style={{ transform: `scaleX(${Math.max(0.03, voiceLevel)})` }} />
                         <i style={{ transform: `scaleX(${soundProgress})` }} />
@@ -797,7 +775,7 @@ function App() {
                   )}
 
                   {step === 'grow' && media.microphone !== 'ready' && (
-                    <p className="voice-unavailable">Voice is off. Hands and Tap to Grow still work.</p>
+                    <p className="voice-unavailable">Voice is off. Tap to Grow still works.</p>
                   )}
 
                   {step === 'plant' ? (

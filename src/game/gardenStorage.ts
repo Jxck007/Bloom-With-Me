@@ -85,12 +85,30 @@ export function isGardenData(value: unknown): value is GardenData {
     && Number(data.activePageIndex) < data.pages.length
 }
 
+function normalizeGardenData(value: unknown): GardenData | null {
+  if (!value || typeof value !== 'object') return null
+  const data = value as Partial<GardenData>
+  if (
+    data.version !== GARDEN_STORAGE_VERSION
+    || !Array.isArray(data.pages)
+    || data.pages.length === 0
+    || !data.pages.every(isGardenPage)
+  ) return null
+
+  const rawIndex = Number.isInteger(data.activePageIndex) ? Number(data.activePageIndex) : 0
+  return {
+    version: GARDEN_STORAGE_VERSION,
+    pages: data.pages,
+    activePageIndex: Math.min(Math.max(rawIndex, 0), data.pages.length - 1),
+  }
+}
+
 export function loadGardenData(storage: GardenStorage = localStorage): GardenData {
   try {
     const raw = storage.getItem(GARDEN_STORAGE_KEY)
     if (!raw) return createEmptyGarden()
     const parsed: unknown = JSON.parse(raw)
-    return isGardenData(parsed) ? parsed : createEmptyGarden()
+    return normalizeGardenData(parsed) ?? createEmptyGarden()
   } catch {
     return createEmptyGarden()
   }

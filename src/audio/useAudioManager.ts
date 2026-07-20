@@ -7,6 +7,7 @@ export type AudioCue =
   | 'sunlight'
   | 'rain'
   | 'sprout'
+  | 'voice-grow'
   | 'flower-bloom'
   | 'final-garden'
 
@@ -108,6 +109,11 @@ export function useAudioManager() {
     if (cue === 'sprout') {
       tone(context, 392, now, 0.28, 0.02)
       tone(context, 523.25, now + 0.15, 0.34, 0.022)
+    }
+    if (cue === 'voice-grow') {
+      tone(context, 760, now, 0.09, 0.024, 'triangle')
+      tone(context, 523.25, now + 0.1, 0.38, 0.02)
+      tone(context, 659.25, now + 0.2, 0.42, 0.018)
     }
     if (cue === 'flower-bloom') {
       tone(context, 523.25, now, 0.5, 0.02)

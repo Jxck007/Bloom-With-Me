@@ -4,9 +4,7 @@ import { permissionFailure } from '../media/permissionState'
 import {
   advanceStablePinch,
   gestureCooldownReady,
-  fistScore,
   initialStablePinchTracker,
-  isFist,
   isOpenPalm,
   isWaving,
   openPalmScore,
@@ -258,14 +256,13 @@ export function useHandTracking({ paused = false }: { paused?: boolean } = {}) {
     const scores = {
       'open-palm': openPalmScore(landmarks),
       wave: waveScore(wristHistoryRef.current),
-      fist: fistScore(landmarks),
     }
     const raw = {
       'open-palm': isOpenPalm(landmarks),
       wave: isOpenPalm(landmarks) && isWaving(wristHistoryRef.current),
     }
     const selected = (['wave', 'open-palm'] as const).find((gesture) => raw[gesture])
-    const pose = selected ?? (isFist(landmarks) ? 'fist' : undefined)
+    const pose = selected
 
     stableRef.current = updateGestureStability(stableRef.current, selected)
 

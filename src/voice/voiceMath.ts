@@ -3,8 +3,10 @@ export const TAMIL_GROWTH_TERMS = ['வளர்', 'வளரு', 'மலர்
 export const GROWTH_TERMS = [...ENGLISH_GROWTH_TERMS, ...TAMIL_GROWTH_TERMS] as const
 
 export const VOICE_CALIBRATION_MS = 900
-export const VOICE_SUSTAIN_MS = 500
+export const VOICE_SUSTAIN_MS = 900
 export const VOICE_COOLDOWN_MS = 1600
+export const VOICE_SILENCE_GRACE_MS = 600
+export const VOICE_PROGRESS_DECAY_MS = 1400
 
 export function speechRecognitionSupported(scope: { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown }): boolean {
   return Boolean(scope.SpeechRecognition ?? scope.webkitSpeechRecognition)
@@ -56,6 +58,8 @@ export interface VocalGateState {
   baseline: number
   threshold: number
   loudSince: number | null
+  lastUpdatedAt: number
+  smoothedRms: number
   progress: number
   triggered: boolean
 }
@@ -67,6 +71,8 @@ export const initialVocalGateState = (now: number): VocalGateState => ({
   baseline: 0.008,
   threshold: 0.025,
   loudSince: null,
+  lastUpdatedAt: now,
+  smoothedRms: 0,
   progress: 0,
   triggered: false,
 })
@@ -97,26 +103,39 @@ export function advanceVocalGate(current: VocalGateState, rms: number, now: numb
       calibrated: true,
       baseline,
       threshold: thresholdFor(baseline),
+      lastUpdatedAt: now,
+      smoothedRms: baseline,
     }
   }
 
-  const clearlyLoud = rms >= current.threshold
+  const elapsed = Math.max(0, now - current.lastUpdatedAt)
+  const smoothing = 1 - Math.exp(-elapsed / 120)
+  const smoothedRms = current.smoothedRms + (rms - current.smoothedRms) * Math.max(0.08, Math.min(0.55, smoothing))
+  const clearlyLoud = smoothedRms >= current.threshold
   if (!clearlyLoud) {
-    const baseline = current.baseline * 0.985 + rms * 0.015
+    const baseline = current.baseline * 0.985 + smoothedRms * 0.015
+    const silentFor = current.loudSince === null ? Number.POSITIVE_INFINITY : now - current.loudSince
+    const progress = silentFor > VOICE_SILENCE_GRACE_MS
+      ? Math.max(0, current.progress - elapsed / VOICE_PROGRESS_DECAY_MS)
+      : current.progress
     return {
       ...current,
       baseline,
       threshold: thresholdFor(baseline),
-      loudSince: null,
-      progress: 0,
+      loudSince: progress > 0 ? current.loudSince : null,
+      lastUpdatedAt: now,
+      smoothedRms,
+      progress,
     }
   }
 
   const loudSince = current.loudSince ?? now
-  const progress = Math.min(1, (now - loudSince) / VOICE_SUSTAIN_MS)
+  const progress = Math.min(1, current.progress + elapsed / VOICE_SUSTAIN_MS)
   return {
     ...current,
     loudSince,
+    lastUpdatedAt: now,
+    smoothedRms,
     progress,
     triggered: progress >= 1,
   }

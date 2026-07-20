@@ -9,6 +9,7 @@ import {
   speechRecognitionSupported,
   TAMIL_GROWTH_TERMS,
   VOICE_CALIBRATION_MS,
+  VOICE_SILENCE_GRACE_MS,
   VOICE_SUSTAIN_MS,
 } from '../src/voice/voiceMath.ts'
 
@@ -42,7 +43,7 @@ test('a short sound spike is rejected', () => {
   gate = advanceVocalGate(gate, 0.08, VOICE_CALIBRATION_MS + 120)
   gate = advanceVocalGate(gate, 0.006, VOICE_CALIBRATION_MS + 140)
   assert.equal(gate.triggered, false)
-  assert.equal(gate.progress, 0)
+  assert.ok(gate.progress < 0.2)
 })
 
 test('a sustained sound above baseline is accepted', () => {
@@ -50,6 +51,18 @@ test('a sustained sound above baseline is accepted', () => {
   gate = advanceVocalGate(gate, 0.08, VOICE_CALIBRATION_MS + 1)
   gate = advanceVocalGate(gate, 0.08, VOICE_CALIBRATION_MS + VOICE_SUSTAIN_MS + 2)
   assert.equal(gate.triggered, true)
+})
+
+test('brief silence preserves voice progress before gradual decay', () => {
+  let gate = calibratedGate()
+  gate = advanceVocalGate(gate, 0.08, VOICE_CALIBRATION_MS + 1)
+  gate = advanceVocalGate(gate, 0.08, VOICE_CALIBRATION_MS + 360)
+  const progressBeforeSilence = gate.progress
+  gate = advanceVocalGate(gate, 0.002, VOICE_CALIBRATION_MS + 360 + VOICE_SILENCE_GRACE_MS - 80)
+  assert.ok(gate.progress >= progressBeforeSilence)
+  gate = advanceVocalGate(gate, 0.002, VOICE_CALIBRATION_MS + 360 + VOICE_SILENCE_GRACE_MS + 900)
+  assert.ok(gate.progress < progressBeforeSilence)
+  assert.ok(gate.progress > 0)
 })
 
 test('ambient baseline adapts while quiet and raises the loudness threshold', () => {

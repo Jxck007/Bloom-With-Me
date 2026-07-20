@@ -173,7 +173,10 @@ export function GardenScene({
   const [candidateSlotIndex, setCandidateSlotIndex] = useState<number | null>(null)
   const [sunAnchor, setSunAnchor] = useState<{ x: number; y: number } | null>(null)
 
-  const activePage = garden.pages[garden.activePageIndex]
+  const activePageIndex = garden.pages.length > 0
+    ? Math.min(Math.max(garden.activePageIndex, 0), garden.pages.length - 1)
+    : 0
+  const activePage = garden.pages[activePageIndex] ?? { id: 'garden-empty-view', flowers: [] }
   const occupiedSlots = useMemo(() => new Set(activePage.flowers.map((flower) => flower.slotIndex)), [activePage.flowers])
   const slots = useMemo(() => slotWithOccupancy(occupiedSlots), [occupiedSlots])
   const suggestedSlotIndex = useMemo(() => {
@@ -197,6 +200,7 @@ export function GardenScene({
   const raining = weatherState === 'raining'
   const pot = watered ? assets.pots.watered : planted ? assets.pots.planted : assets.pots.empty
   const growthLayout = selected ? FLOWER_GROWTH_LAYOUT[selected.id] : null
+  const activeLooseSeed = !gardenView && step === 'plant' && selected ? selected : null
   const preloadSources = useMemo(() => {
     const flowerFrames = selected ? assets.flowers[selected.id] : []
     if (gardenView) return [assets.garden.plantingGrid, ...activePage.flowers.map((flower) => assets.flowers[flower.flowerType][5])]
@@ -438,7 +442,7 @@ export function GardenScene({
         updateDrag(idleDrag())
         updateHovered(null)
         onPlantSeed?.()
-      }, 1_000)
+      }, 1_150)
       return
     }
 
@@ -577,7 +581,7 @@ export function GardenScene({
     if (start === null || !showGardenGrid) return
     const delta = (event.changedTouches[0]?.clientX ?? start) - start
     if (Math.abs(delta) < 45) return
-    const next = garden.activePageIndex + (delta < 0 ? 1 : -1)
+    const next = activePageIndex + (delta < 0 ? 1 : -1)
     if (next >= 0 && next < garden.pages.length) onGardenPageChange?.(next)
   }
 
@@ -652,7 +656,7 @@ export function GardenScene({
         <div
           ref={gridRef}
           className={`garden-grid ${step === 'place' ? 'garden-grid--revealed' : ''}`}
-          aria-label={`Garden ${garden.activePageIndex + 1}, ${activePage.flowers.length} of 12 slots planted`}
+          aria-label={`Garden ${activePageIndex + 1}, ${activePage.flowers.length} of 12 slots planted`}
           onTouchStart={onGridTouchStart}
           onTouchEnd={onGridTouchEnd}
         >
@@ -696,9 +700,9 @@ export function GardenScene({
 
       {showGardenGrid && (
         <nav className="garden-pagination" aria-label="Garden pages">
-          <button type="button" onClick={() => onGardenPageChange?.(garden.activePageIndex - 1)} disabled={garden.activePageIndex === 0} aria-label="Previous garden">‹</button>
-          <span>Garden {garden.activePageIndex + 1}</span>
-          <button type="button" onClick={() => onGardenPageChange?.(garden.activePageIndex + 1)} disabled={garden.activePageIndex === garden.pages.length - 1} aria-label="Next garden">›</button>
+          <button type="button" onClick={() => onGardenPageChange?.(activePageIndex - 1)} disabled={activePageIndex === 0} aria-label="Previous garden">‹</button>
+          <span>Garden {activePageIndex + 1}</span>
+          <button type="button" onClick={() => onGardenPageChange?.(activePageIndex + 1)} disabled={activePageIndex === garden.pages.length - 1} aria-label="Next garden">›</button>
         </nav>
       )}
 
@@ -723,18 +727,18 @@ export function GardenScene({
         </div>
       )}
 
-      {!gardenView && step === 'plant' && selected && (
+      {activeLooseSeed && (
         <button
           ref={looseSeedRef}
-          className={`loose-seed-control ${hovered?.id === selected.id ? 'is-hovered' : ''} ${drag.kind === 'seed' ? 'is-grabbed' : ''}`}
+          className={`loose-seed-control ${hovered?.id === activeLooseSeed.id ? 'is-hovered' : ''} ${drag.kind === 'seed' ? 'is-grabbed' : ''}`}
           type="button"
-          aria-label={`Drag the loose ${selected.name} seed into the pot`}
-          onPointerDown={(event) => onPointerDown(event, 'seed', selected)}
+          aria-label={`Drag the loose ${activeLooseSeed.name} seed into the pot`}
+          onPointerDown={(event) => onPointerDown(event, 'seed', activeLooseSeed)}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerCancel}
         >
-          <AssetImage src={assets.seeds[selected.id].seed} alt={`${selected.name} seed`} draggable={false} />
+          <AssetImage src={assets.seeds[activeLooseSeed.id].seed} alt={`${activeLooseSeed.name} seed`} draggable={false} />
         </button>
       )}
 
@@ -748,7 +752,7 @@ export function GardenScene({
         />
       )}
 
-      {!gardenView && step === 'plant' && <div className={`pot-drop-zone ${dropZoneOverlap ? 'is-overlapping' : ''}`} aria-hidden="true" />}
+      {!gardenView && step === 'plant' && drag.kind === 'seed' && <div className={`pot-drop-zone ${dropZoneOverlap ? 'is-overlapping' : ''}`} aria-hidden="true" />}
 
       {!gardenView && !['welcome', 'choose'].includes(step) && (
         <div className="pot-area pot-growth-composition">

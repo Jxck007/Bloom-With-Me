@@ -3,18 +3,13 @@ import test from 'node:test'
 import {
   advanceStablePinch,
   gestureCooldownReady,
-  GROW_GESTURE_COOLDOWN_MS,
-  GROW_LOST_FRAME_TOLERANCE,
-  GROW_POSE_STABLE_MS,
   initialStablePinchTracker,
-  initialGrowGestureTracker,
   nextGestureCooldown,
   PALM_STABLE_FRAMES,
   PINCH_LOST_FRAME_TOLERANCE,
   PINCH_RELEASE_RATIO,
   PINCH_START_RATIO,
   updateGestureStability,
-  updateCloseOpenGrow,
   waveDirectionChanges,
 } from '../src/gesture/gestureMath.ts'
 import { findGardenSlotIncludingOccupied, findMagneticGardenSlot, GARDEN_SLOTS } from '../src/game/gardenSlots.ts'
@@ -95,39 +90,6 @@ test('weather gesture cooldown blocks repeats until its deadline', () => {
   const cooldownUntil = nextGestureCooldown(1000)
   assert.equal(gestureCooldownReady(cooldownUntil - 1, cooldownUntil), false)
   assert.equal(gestureCooldownReady(cooldownUntil, cooldownUntil), true)
-})
-
-test('close-open grow requires stable fist before stable open palm', () => {
-  let tracker = initialGrowGestureTracker()
-  let update = updateCloseOpenGrow(tracker, 'open', 0)
-  tracker = update.tracker
-  update = updateCloseOpenGrow(tracker, 'open', GROW_POSE_STABLE_MS + 20)
-  assert.equal(update.confirmed, false)
-  assert.equal(update.tracker.phase, 'waitingForFist')
-
-  tracker = updateCloseOpenGrow(update.tracker, 'fist', 600).tracker
-  tracker = updateCloseOpenGrow(tracker, 'fist', 600 + GROW_POSE_STABLE_MS).tracker
-  assert.equal(tracker.phase, 'fistStable')
-  tracker = updateCloseOpenGrow(tracker, 'open', 1100).tracker
-  update = updateCloseOpenGrow(tracker, 'open', 1100 + GROW_POSE_STABLE_MS)
-  assert.equal(update.confirmed, true)
-  assert.equal(update.tracker.phase, 'openStable')
-})
-
-test('close-open grow tolerates two lost frames and applies cooldown', () => {
-  let tracker = updateCloseOpenGrow(initialGrowGestureTracker(), 'fist', 0).tracker
-  tracker = updateCloseOpenGrow(tracker, 'fist', GROW_POSE_STABLE_MS).tracker
-  tracker = updateCloseOpenGrow(tracker, 'open', 500).tracker
-  for (let frame = 0; frame < GROW_LOST_FRAME_TOLERANCE; frame += 1) {
-    tracker = updateCloseOpenGrow(tracker, 'none', 520 + frame * 16).tracker
-  }
-  const confirmed = updateCloseOpenGrow(tracker, 'open', 500 + GROW_POSE_STABLE_MS)
-  assert.equal(confirmed.confirmed, true)
-  const advanced = updateCloseOpenGrow(confirmed.tracker, 'open', 1000).tracker
-  assert.equal(advanced.phase, 'stageAdvanced')
-  const cooldown = updateCloseOpenGrow(advanced, 'open', 1016).tracker
-  assert.equal(cooldown.phase, 'cooldown')
-  assert.equal(updateCloseOpenGrow(cooldown, 'open', 1000 + GROW_GESTURE_COOLDOWN_MS - 1).confirmed, false)
 })
 
 test('magnetic garden drop accepts near misses and skips occupied slots', () => {
