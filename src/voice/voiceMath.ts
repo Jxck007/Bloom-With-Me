@@ -89,7 +89,15 @@ function thresholdFor(baseline: number): number {
 }
 
 export function advanceVocalGate(current: VocalGateState, rms: number, now: number): VocalGateState {
-  if (current.triggered) return current
+  if (current.triggered) {
+    return {
+      ...current,
+      triggered: false,
+      loudSince: null,
+      lastUpdatedAt: now,
+      progress: Math.max(0, current.progress - Math.max(0, now - current.lastUpdatedAt) / VOICE_PROGRESS_DECAY_MS),
+    }
+  }
 
   if (!current.calibrated) {
     const calibrationSamples = [...current.calibrationSamples, rms].slice(-90)

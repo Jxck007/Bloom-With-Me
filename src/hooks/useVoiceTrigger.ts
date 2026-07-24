@@ -42,6 +42,8 @@ declare global {
   }
 }
 
+type InputSource = 'speech' | 'sound' | 'touch'
+
 interface VoiceSession {
   active: boolean
   stream: MediaStream | null
@@ -52,6 +54,7 @@ interface VoiceSession {
   frame: number | null
   recognitionRestartTimer: number | null
   recognitionStarts: number
+  recognitionRunning: boolean
   gate: VocalGateState
   lastEncouragementAt: number
   lastMeterUpdateAt: number
@@ -60,6 +63,7 @@ interface VoiceSession {
 
 const VOICE_PROMPTS = ['Say Bloom', 'Say Grow', 'Hello Flower!', 'Keep Talking!', 'Wonderful!'] as const
 const VOICE_REWARDS = ['🌱 Good!', '🌼 Growing...'] as const
+const DEBUG = import.meta.env.DEV
 
 function stopLiveTracks(stream: MediaStream | null) {
   stream?.getTracks().forEach((track) => {
@@ -67,10 +71,24 @@ function stopLiveTracks(stream: MediaStream | null) {
   })
 }
 
+function pauseSession(session: VoiceSession) {
+  if (session.frame !== null) {
+    cancelAnimationFrame(session.frame)
+    session.frame = null
+  }
+  if (session.recognitionRestartTimer !== null) {
+    window.clearTimeout(session.recognitionRestartTimer)
+    session.recognitionRestartTimer = null
+  }
+  if (session.recognition && session.recognitionRunning) {
+    try { session.recognition.stop() } catch { /* ignore */ }
+    session.recognitionRunning = false
+  }
+}
+
 function disposeSession(session: VoiceSession) {
   session.active = false
-  if (session.frame !== null) cancelAnimationFrame(session.frame)
-  if (session.recognitionRestartTimer !== null) window.clearTimeout(session.recognitionRestartTimer)
+  pauseSession(session)
   if (session.recognition) {
     session.recognition.onresult = null
     session.recognition.onerror = null
@@ -84,6 +102,16 @@ function disposeSession(session: VoiceSession) {
   if (session.audioContext && session.audioContext.state !== 'closed') void session.audioContext.close()
 }
 
+function resetSessionGate(session: VoiceSession, now: number) {
+  session.gate = {
+    ...session.gate,
+    progress: 0,
+    triggered: false,
+    loudSince: null,
+    lastUpdatedAt: now,
+  }
+}
+
 export function useVoiceTrigger(onTrigger: () => void, onReward?: () => void) {
   const [status, setStatus] = useState<VoiceStatus>('idle')
   const [level, setLevel] = useState(0)
@@ -91,10 +119,12 @@ export function useVoiceTrigger(onTrigger: () => void, onReward?: () => void) {
   const [transcript, setTranscript] = useState('')
   const [feedback, setFeedback] = useState('Tap the microphone')
   const [speechSupported, setSpeechSupported] = useState(() => speechRecognitionSupported(window))
+  const [diagnostics, setDiagnostics] = useState<Record<string, string | number>>({})
   const sessionRef = useRef<VoiceSession | null>(null)
   const completionTimerRef = useRef<number | null>(null)
   const cooldownUntilRef = useRef(0)
   const triggeredRef = useRef(false)
+  const liveRestartTimerRef = useRef<number | null>(null)
 
   const clearCompletionTimer = useCallback(() => {
     if (completionTimerRef.current !== null) {
@@ -103,11 +133,43 @@ export function useVoiceTrigger(onTrigger: () => void, onReward?: () => void) {
     }
   }, [])
 
+  const clearRestartTimer = useCallback(() => {
+    if (liveRestartTimerRef.current !== null) {
+      window.clearTimeout(liveRestartTimerRef.current)
+      liveRestartTimerRef.current = null
+    }
+  }, [])
+
   const cleanupSession = useCallback(() => {
     const session = sessionRef.current
     sessionRef.current = null
     if (session) disposeSession(session)
-  }, [])
+    clearRestartTimer()
+  }, [clearRestartTimer])
+
+  const restartSession = useCallback((permittedStream?: MediaStream | null) => {
+    const session = sessionRef.current
+    if (!session || !session.active || triggeredRef.current) return
+    if (session.audioContext?.state === 'suspended') {
+      void session.audioContext.resume()
+    }
+    if (session.recognition && !session.recognitionRunning) {
+      try {
+        session.recognition.start()
+        session.recognitionRunning = true
+      } catch {
+        setSpeechSupported(false)
+        setFeedback('Microphone unavailable')
+      }
+    }
+    resetSessionGate(session, performance.now())
+    setStatus('listening')
+    setSoundProgress(0)
+    setFeedback('Say Grow or make a gentle sound.')
+    if (DEBUG && session.stream) {
+      setDiagnostics((prev) => ({ ...prev, restartedAt: performance.now().toFixed(0) }))
+    }
+  }, [setSpeechSupported, setFeedback])
 
   const stop = useCallback(() => {
     clearCompletionTimer()
@@ -118,24 +180,30 @@ export function useVoiceTrigger(onTrigger: () => void, onReward?: () => void) {
     setSoundProgress(0)
     setTranscript('')
     setFeedback('Tap the microphone')
+    if (DEBUG) setDiagnostics({})
   }, [cleanupSession, clearCompletionTimer])
 
-  const complete = useCallback((source: 'speech' | 'sound') => {
+  const complete = useCallback((source: InputSource) => {
     const now = performance.now()
     if (triggeredRef.current || now < cooldownUntilRef.current) return
     triggeredRef.current = true
     cooldownUntilRef.current = now + VOICE_COOLDOWN_MS
     setStatus('heard')
     setSoundProgress(1)
-    setFeedback(source === 'speech' ? '🌱 Good!' : '🌼 Growing...')
+    setFeedback(source === 'speech' ? 'Great! The flower is growing.' : 'Great! The flower is growing.')
     onReward?.()
+
+    clearRestartTimer()
     cleanupSession()
+    triggeredRef.current = true
+
     clearCompletionTimer()
     completionTimerRef.current = window.setTimeout(() => {
       completionTimerRef.current = null
       onTrigger()
+      triggeredRef.current = false
     }, 520)
-  }, [cleanupSession, clearCompletionTimer, onReward, onTrigger])
+  }, [clearCompletionTimer, clearRestartTimer, cleanupSession, onReward, onTrigger])
 
   const recalibrate = useCallback(() => {
     const session = sessionRef.current
@@ -149,7 +217,9 @@ export function useVoiceTrigger(onTrigger: () => void, onReward?: () => void) {
   }, [])
 
   const start = useCallback(async (permittedStream?: MediaStream | null) => {
-    if (sessionRef.current?.active || triggeredRef.current) return
+    const now = performance.now()
+    if (sessionRef.current?.active) return
+    if (triggeredRef.current && now < cooldownUntilRef.current) return
     clearCompletionTimer()
     cleanupSession()
     triggeredRef.current = false
@@ -175,6 +245,7 @@ export function useVoiceTrigger(onTrigger: () => void, onReward?: () => void) {
       frame: null,
       recognitionRestartTimer: null,
       recognitionStarts: 0,
+      recognitionRunning: false,
       gate: initialVocalGateState(performance.now()),
       lastEncouragementAt: performance.now(),
       lastMeterUpdateAt: 0,
@@ -222,9 +293,32 @@ export function useVoiceTrigger(onTrigger: () => void, onReward?: () => void) {
       if (SpeechRecognitionClass) {
         const recognition = new SpeechRecognitionClass()
         session.recognition = recognition
+        session.recognitionRunning = false
         recognition.continuous = true
         recognition.interimResults = true
         recognition.lang = navigator.language || 'en-IN'
+
+        const startRecognition = () => {
+          if (!session.active || session.recognitionRunning) return
+          try {
+            recognition.start()
+            session.recognitionRunning = true
+            if (DEBUG) setDiagnostics((prev) => ({ ...prev, recognition: 'started' }))
+          } catch {
+            session.recognitionRunning = false
+            setSpeechSupported(false)
+            setFeedback('Microphone unavailable')
+          }
+        }
+
+        const stopRecognition = () => {
+          if (!session.recognitionRunning) return
+          try {
+            recognition.stop()
+          } catch { /* ignore */ }
+          session.recognitionRunning = false
+        }
+
         recognition.onresult = (event) => {
           if (!session.active || triggeredRef.current) return
           const pieces: string[] = []
@@ -238,9 +332,13 @@ export function useVoiceTrigger(onTrigger: () => void, onReward?: () => void) {
           const normalized = normalizeTranscript(pieces.join(' '))
           if (!normalized) return
           setTranscript(normalized.slice(-72))
-          if (!session.analyser && (hasFinalResult || normalized.length >= 3 || matchesGrowthPhrase(normalized))) complete('speech')
-          else if (session.gate.progress > 0) setFeedback(VOICE_REWARDS[Math.min(VOICE_REWARDS.length - 1, Math.floor(session.gate.progress * 2))])
-          else setFeedback(hasFinalResult ? 'Wonderful!' : 'Keep Talking!')
+          if (!session.analyser && (hasFinalResult || normalized.length >= 3 || matchesGrowthPhrase(normalized))) {
+            complete('speech')
+          } else if (session.gate.progress > 0) {
+            setFeedback(VOICE_REWARDS[Math.min(VOICE_REWARDS.length - 1, Math.floor(session.gate.progress * 2))])
+          } else {
+            setFeedback(hasFinalResult ? 'I can hear you…' : 'Keep going…')
+          }
         }
         recognition.onnomatch = () => {
           if (session.active && !triggeredRef.current) setFeedback('Try again')
@@ -249,34 +347,40 @@ export function useVoiceTrigger(onTrigger: () => void, onReward?: () => void) {
           if (!session.active || triggeredRef.current) return
           if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
             setSpeechSupported(false)
-            setFeedback('Voice is not available here')
+            setFeedback('Microphone unavailable')
+            stopRecognition()
           } else if (event.error === 'no-speech') {
             setFeedback('Try again')
+            stopRecognition()
+            liveRestartTimerRef.current = window.setTimeout(() => {
+              if (!session.active || triggeredRef.current) return
+              startRecognition()
+            }, 400)
+          } else {
+            setFeedback('Try again')
+            stopRecognition()
           }
         }
         recognition.onend = () => {
+          session.recognitionRunning = false
           if (!session.active || triggeredRef.current) return
           if (session.recognitionStarts >= 2) {
             setFeedback('Try again')
             return
           }
-          session.recognitionRestartTimer = window.setTimeout(() => {
+          liveRestartTimerRef.current = window.setTimeout(() => {
             if (!session.active || triggeredRef.current) return
-            try {
-              session.recognitionStarts += 1
-              recognition.start()
-            } catch {
-              setSpeechSupported(false)
-              setFeedback('Voice is not available here')
-            }
+            session.recognitionStarts += 1
+            startRecognition()
           }, 250)
         }
+
         try {
           session.recognitionStarts = 1
-          recognition.start()
+          startRecognition()
         } catch {
           setSpeechSupported(false)
-          setFeedback('Voice is not available here')
+          setFeedback('Microphone unavailable')
         }
       }
 
@@ -300,22 +404,32 @@ export function useVoiceTrigger(onTrigger: () => void, onReward?: () => void) {
           const now = performance.now()
           session.gate = advanceVocalGate(session.gate, rms, now)
 
-          // Keep audio analysis responsive while limiting React updates to about 20 Hz.
           if (now - session.lastMeterUpdateAt >= 50) {
             session.lastMeterUpdateAt = now
             const meterRange = Math.max(0.02, session.gate.threshold)
             setLevel(Math.min(1, session.gate.smoothedRms / meterRange))
             setSoundProgress(session.gate.progress)
-
+            if (DEBUG) {
+              setDiagnostics({
+                stage: 'grow',
+                rms: rms.toFixed(4),
+                baseline: session.gate.baseline.toFixed(4),
+                threshold: session.gate.threshold.toFixed(4),
+                progress: session.gate.progress.toFixed(3),
+                audioState: session.audioContext?.state ?? 'unknown',
+                track: session.stream?.getAudioTracks()[0]?.readyState ?? 'none',
+                recognition: session.recognitionRunning ? 'running' : 'stopped',
+              })
+            }
             if (session.gate.calibrated) {
               setStatus('listening')
-              if (session.gate.progress > 0) setFeedback(session.gate.progress > 0.58 ? '🌼 Growing...' : '🌱 Good!')
+              if (session.gate.progress > 0) setFeedback(session.gate.progress > 0.58 ? 'Keep going…' : 'I can hear you…')
               else if (now - session.lastEncouragementAt > 5000) {
                 session.lastEncouragementAt = now
                 session.feedbackIndex = (session.feedbackIndex + 1) % VOICE_PROMPTS.length
                 setFeedback(VOICE_PROMPTS[session.feedbackIndex])
               } else {
-                setFeedback((current) => current === 'Voice is not available here' ? current : VOICE_PROMPTS[session.feedbackIndex])
+                setFeedback((current) => current === 'Microphone unavailable' ? current : VOICE_PROMPTS[session.feedbackIndex])
               }
             }
           }
@@ -338,7 +452,11 @@ export function useVoiceTrigger(onTrigger: () => void, onReward?: () => void) {
     }
   }, [cleanupSession, clearCompletionTimer, complete])
 
-  useEffect(() => stop, [stop])
+  useEffect(() => {
+    return () => {
+      stop()
+    }
+  }, [stop])
 
   return {
     status,
@@ -347,8 +465,11 @@ export function useVoiceTrigger(onTrigger: () => void, onReward?: () => void) {
     transcript,
     feedback,
     speechSupported,
+    diagnostics: DEBUG ? diagnostics : undefined,
     start,
+    beginListening: start,
     stop,
     recalibrate,
+    cooldownRemaining: Math.max(0, cooldownUntilRef.current - performance.now()),
   }
 }

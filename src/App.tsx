@@ -200,8 +200,11 @@ function App() {
     soundProgress,
     transcript: voiceTranscript,
     feedback: voiceFeedback,
+    diagnostics: voiceDiagnostics,
+    speechSupported,
     start: startVoice,
     stop: stopVoice,
+    beginListening,
   } = useVoiceTrigger(advanceGrowthStage, () => {
     void playSound('voice-grow')
   })
@@ -350,12 +353,12 @@ function App() {
       setGrowthStarted(true)
       growthStartedRef.current = true
       setVoiceStarted(true)
-      void startVoice(media.stream)
+      void beginListening(media.stream)
     } else if (!growthStarted) {
       setGrowthStarted(true)
       growthStartedRef.current = true
     }
-  }, [growthStarted, media.microphone, media.stream, startVoice, step, stopVoice, viewingGarden, voiceStarted])
+  }, [growthStarted, media.microphone, media.stream, beginListening, step, stopVoice, viewingGarden, voiceStarted])
 
   useEffect(() => {
     viewingGardenRef.current = viewingGarden
@@ -524,6 +527,13 @@ function App() {
       void playSound('button-tap')
     }
   }
+
+  useEffect(() => {
+    if (step !== 'grow') return
+    if (growthCompletionTimerRef.current !== null) return
+    if (!media.stream || media.microphone !== 'ready') return
+    void beginListening(media.stream)
+  }, [beginListening, growthStage, media.microphone, media.stream, step])
 
   if (!assets) {
     return (
@@ -758,7 +768,7 @@ function App() {
 
                   {step === 'grow' && voiceStarted && (
                     <div className={`voice-listening ${soundProgress > 0 ? 'voice-listening--active' : ''} ${voiceStatus === 'heard' ? 'voice-listening--heard' : ''}`} role="status">
-                      <span>{voiceStatus === 'heard' ? voiceFeedback : 'Voice & sound listening'}</span>
+                      <span>{voiceStatus === 'heard' ? voiceFeedback : 'Say Grow or make a gentle sound.'}</span>
                       {voiceTranscript && <span className="voice-status__transcript">Heard: “{voiceTranscript}”</span>}
                       <span className="voice-growth-effect" aria-hidden="true">
                         <i />
@@ -771,6 +781,13 @@ function App() {
                         <span style={{ transform: `scaleX(${Math.max(0.03, voiceLevel)})` }} />
                         <i style={{ transform: `scaleX(${soundProgress})` }} />
                       </div>
+                      {voiceDiagnostics && (
+                        <div className="voice-diagnostics" aria-hidden="true">
+                          {Object.entries(voiceDiagnostics).map(([key, value]) => (
+                            <div key={key}><strong>{key}:</strong> {String(value)}</div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
 

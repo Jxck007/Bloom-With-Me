@@ -53,6 +53,16 @@ test('a sustained sound above baseline is accepted', () => {
   assert.equal(gate.triggered, true)
 })
 
+test('the vocal gate resets after a successful trigger so it can fire again', () => {
+  let gate = calibratedGate()
+  gate = advanceVocalGate(gate, 0.08, VOICE_CALIBRATION_MS + 1)
+  gate = advanceVocalGate(gate, 0.08, VOICE_CALIBRATION_MS + VOICE_SUSTAIN_MS + 2)
+  assert.equal(gate.triggered, true)
+
+  gate = advanceVocalGate(gate, 0.002, VOICE_CALIBRATION_MS + VOICE_SUSTAIN_MS + 2 + 300)
+  assert.equal(gate.triggered, false)
+})
+
 test('brief silence preserves voice progress before gradual decay', () => {
   let gate = calibratedGate()
   gate = advanceVocalGate(gate, 0.08, VOICE_CALIBRATION_MS + 1)
